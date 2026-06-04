@@ -1,0 +1,6 @@
+{
+  "name": "Into The Mission",
+  "description": "A retro, brutalist style gamified task manager.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
