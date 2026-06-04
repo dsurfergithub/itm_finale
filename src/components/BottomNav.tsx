@@ -23,7 +23,7 @@ export function BottomNav({ activeTab, onChangeTab }: BottomNavProps) {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center bg-surface border-t-4 border-primary hard-shadow pb-safe h-20">
+    <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center bg-surface border-t-4 border-primary hard-shadow pb-[env(safe-area-inset-bottom)] h-[calc(5rem+env(safe-area-inset-bottom))]">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;

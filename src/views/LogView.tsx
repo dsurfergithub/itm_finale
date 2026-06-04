@@ -5,7 +5,7 @@ export function LogView() {
   const { state } = useStore();
 
   return (
-    <div className="pt-24 pb-32 px-4 max-w-2xl mx-auto space-y-6 w-full animate-in slide-in-from-bottom-8 duration-500">
+    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-2xl mx-auto space-y-6 w-full animate-in slide-in-from-bottom-8 duration-500">
       
       <section className="mb-8">
         <div className="bg-surface-container p-4 border-2 border-primary hard-shadow">

@@ -47,7 +47,7 @@ export function StatsView() {
   const blocks = Math.floor(percentage / 10);
 
   return (
-    <div className="pt-24 pb-32 px-4 max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-300">
+    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-2xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-300">
       
       <section className="mb-10">
         <div className="text-xs font-bold text-primary mb-1">RANGO ACTUAL</div>

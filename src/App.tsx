@@ -46,7 +46,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-background relative flex flex-col selection:bg-primary-container selection:text-on-primary-container">
+    <div className="min-h-[100dvh] bg-background relative flex flex-col selection:bg-primary-container selection:text-on-primary-container">
       {/* Global Retro Overlays */}
       <div className="fixed inset-0 city-grit z-0" />
       <div className="retro-scanline fixed inset-0 z-40 opacity-10 pointer-events-none" />

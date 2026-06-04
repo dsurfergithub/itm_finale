@@ -11,7 +11,7 @@ export function TopBar({ respect, strikes = 0, onReset }: TopBarProps) {
   const { rank } = getRankData(respect);
 
   return (
-    <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 py-4 bg-background border-b-4 border-primary hard-shadow">
+    <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-4 bg-background border-b-4 border-primary hard-shadow">
       <div className="flex items-center gap-2 max-w-[50%] sm:max-w-none overflow-hidden">
         <img 
           src="/logo.png" 

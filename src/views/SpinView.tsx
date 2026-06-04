@@ -78,7 +78,7 @@ export function SpinView({ onMissionAccepted }: { onMissionAccepted?: () => void
   };
 
   return (
-    <div className="flex-grow flex flex-col items-center justify-center pt-24 pb-32 px-4 relative z-10 w-full animate-in fade-in duration-300">
+    <div className="flex-grow flex flex-col items-center justify-center pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 relative z-10 w-full animate-in fade-in duration-300">
       
       <div className="relative w-full max-w-sm">
         {/* SLOT MACHINE UI */}

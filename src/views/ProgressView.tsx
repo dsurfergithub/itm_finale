@@ -32,7 +32,7 @@ export function ProgressView() {
   const efiRatio = state.missions.length > 0 ? Math.floor((passedMissions / state.missions.length) * 100) : 100;
 
   return (
-    <div className="pt-24 pb-32 px-4 max-w-3xl mx-auto space-y-12 animate-in slide-in-from-right-4 duration-300">
+    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-3xl mx-auto space-y-12 animate-in slide-in-from-right-4 duration-300">
       
       <section>
         <div className="flex items-center justify-between mb-4 border-l-8 border-primary pl-2">

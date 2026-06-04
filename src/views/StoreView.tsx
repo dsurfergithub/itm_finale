@@ -69,7 +69,7 @@ export function StoreView() {
   };
 
   return (
-    <div className="pt-24 pb-32 px-4 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h2 className="text-3xl font-black text-primary uppercase tracking-tighter hidden sm:block">MERCADO NEGRO</h2>
