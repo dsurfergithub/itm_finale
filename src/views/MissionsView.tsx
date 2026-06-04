@@ -1,7 +1,7 @@
 import { MapPin, Clock, Trash2, Plus, X, Check } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { useStore } from '../context/StoreContext';
-import { useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { getRankData } from '../utils/leveling';
 
 export function MissionsView() {
@@ -105,26 +105,53 @@ export function MissionsView() {
         const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
         
         let newMissions = [];
+        let newCategories = new Set<string>();
+
         // Skip header line (index 0)
         for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(',').map(c => c.trim());
-          if (cols.length >= 7) {
+          const cols = lines[i].split(';').map(c => c.trim()); // Sometimes it's semicolon separated in ES, but we will try split by comma if semicolon isn't there
+          let actualCols = cols;
+          if (cols.length < 7) {
+            actualCols = lines[i].split(',').map(c => c.trim());
+          }
+
+          if (actualCols.length >= 7) {
+             const category = actualCols[6].toUpperCase();
             newMissions.push({
               id: Date.now().toString() + i,
-              name: cols[0].toUpperCase(),
-              difficulty: cols[1].toUpperCase() as any,
-              location: cols[2].toUpperCase(),
-              durationSeconds: parseInt(cols[3]) * 60,
-              rewardCash: parseInt(cols[4]),
-              rewardRespect: parseInt(cols[5]),
+              name: actualCols[0].toUpperCase(),
+              difficulty: actualCols[1].toUpperCase() as any,
+              location: actualCols[2].toUpperCase(),
+              durationSeconds: parseInt(actualCols[3]) * 60,
+              rewardCash: parseInt(actualCols[4]),
+              rewardRespect: parseInt(actualCols[5]),
               status: 'IDLE',
-              timeRemaining: parseInt(cols[3]) * 60,
-              category: cols[6].toUpperCase()
+              timeRemaining: parseInt(actualCols[3]) * 60,
+              category
             });
+            newCategories.add(category);
           }
         }
         if (newMissions.length > 0) {
-           updateState({ ...state, missions: [...newMissions, ...state.missions] });
+           const existingCategories = new Set(state.categories.map(c => c.name));
+           const categoriesToAdd = Array.from(newCategories).filter(c => !existingCategories.has(c));
+           
+        let nextState = { ...state, missions: [...newMissions, ...state.missions] };
+           if (categoriesToAdd.length > 0) {
+             // We can just add categories to the state manually to avoid calling multiple actions sequentially
+             const nextCats = [...state.categories];
+             categoriesToAdd.forEach(cat => {
+                nextCats.push({
+                  id: Date.now().toString() + Math.random(),
+                  name: cat,
+                  percentage: nextCats.length > 0 ? nextCats[0].percentage : 25,
+                  label: cat.substring(0, 3)
+                });
+             });
+             nextState.categories = nextCats;
+           }
+
+           updateState(nextState);
            soundManager.playJackpot();
            alert(`SE IMPORTARON ${newMissions.length} MISIONES CON ÉXITO`);
         } else {
@@ -135,7 +162,7 @@ export function MissionsView() {
         alert('ARCHIVO CSV DAÑADO O FORMATO INVÁLIDO.');
       }
     };
-    reader.readAsText(file);
+    reader.readAsText(file); // Default UTF-8
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -281,7 +308,13 @@ export function MissionsView() {
              SIN MISIONES ACTIVAS
            </div>
         )}
-        {state.missions.map(mission => {
+        {[...state.missions].sort((a, b) => {
+          if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
+          if (b.status === 'ACTIVE' && a.status !== 'ACTIVE') return 1;
+          if (a.status === 'VERIFY' && b.status !== 'VERIFY') return -1;
+          if (b.status === 'VERIFY' && a.status !== 'VERIFY') return 1;
+          return 0;
+        }).map(mission => {
            const isActive = mission.status === 'ACTIVE';
            const isPassed = mission.status === 'PASSED';
            const isVerify = mission.status === 'VERIFY';
@@ -293,11 +326,16 @@ export function MissionsView() {
               onClick={() => !isPassed && toggleMission(mission.id, mission.status)}
               className={`
                 bg-surface border-2 p-4 cursor-pointer transition-all active:translate-x-1 active:translate-y-1 group relative
-                ${isActive ? 'border-primary-container ring-2 ring-primary-container shadow-none translate-x-1 translate-y-1' : 'border-primary-container hard-shadow'}
+                ${isActive ? 'border-primary ring-2 ring-primary shadow-[0_0_20px_rgba(var(--color-primary),0.3)] translate-x-1 translate-y-1' : 'border-primary-container hard-shadow'}
                 ${isPassed ? 'opacity-50 pointer-events-none' : ''}
                 ${isVerify ? 'border-tertiary shadow-[0_0_15px_rgba(var(--color-tertiary),0.6)]' : ''}
               `}
             >
+              {isActive && (
+                <div className="absolute -top-3 -left-3 bg-primary text-background font-black uppercase text-[10px] px-2 py-1 rotate-[-5deg] z-20 border-2 border-background">
+                  EN CURSO
+                </div>
+              )}
               <button 
                 onClick={(e) => deleteMission(mission.id, e)}
                 className="absolute top-2 right-2 text-error opacity-0 group-hover:opacity-100 hover:scale-110 transition-all bg-surface p-1 rounded-none border border-error z-10"
@@ -327,10 +365,24 @@ export function MissionsView() {
 
               <div className="h-1.5 w-full bg-surface-container-highest mb-4 overflow-hidden">
                 <div 
-                  className={`h-full transition-all duration-1000 ${isPassed || isVerify ? 'bg-tertiary' : 'bg-primary-container'}`} 
+                  className={`h-full transition-all duration-1000 ${isActive ? 'bg-primary' : isPassed || isVerify ? 'bg-tertiary' : 'bg-primary-container'}`} 
                   style={{ width: `${isPassed || isVerify ? 100 : progressPercent}%` }} 
                 />
               </div>
+
+              {isActive && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundManager.playJackpot();
+                    completeMission(mission.id);
+                  }}
+                  className="w-full mb-4 bg-primary text-background font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
+                >
+                  <Check size={20} />
+                  COMPLETAR AHORA
+                </button>
+              )}
 
               {isVerify && (
                 <div className="flex flex-col gap-2 mb-4">

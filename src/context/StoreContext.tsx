@@ -220,9 +220,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
 
       const finishDate = new Date();
+      
+      const elapsedMinutes = Math.floor((mission.durationSeconds - (mission.timeRemaining || 0)) / 60);
+      const timeStr = elapsedMinutes > 0 ? ` (${elapsedMinutes} MIN)` : '';
+
       const passedLog: LogEntry = {
         id: Date.now().toString(),
-        name: mission.name,
+        name: mission.name + timeStr,
         timestamp: finishDate.toLocaleString(),
         points: mission.rewardRespect,
         type: 'RESPECT',

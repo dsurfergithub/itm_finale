@@ -54,14 +54,15 @@ function AppContent() {
       {showMeme && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300">
           <img 
-            src="https://i.kym-cdn.com/entries/icons/original/000/029/322/ahshit.jpg" 
+            src="/here_we_go_again.png" 
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              if (target.src.endsWith('.png')) target.src = '/here_we_go_again.jpg';
+              else target.src = 'https://i.kym-cdn.com/entries/icons/original/000/029/322/ahshit.jpg';
+            }}
             alt="Here we go again" 
-            className="max-w-full max-h-[70vh] object-contain border-4 border-primary shadow-[12px_12px_0px_0px_rgba(255,159,0,1)]"
-            referrerPolicy="no-referrer"
+            className="max-w-full max-h-[70vh] object-contain px-4 drop-shadow-2xl"
           />
-          <p className="mt-12 font-black text-2xl sm:text-4xl text-primary uppercase tracking-widest text-center px-4 max-w-2xl">
-            Ah shit, here we go again...
-          </p>
         </div>
       )}
 

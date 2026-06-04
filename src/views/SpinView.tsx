@@ -1,24 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Target, AlertTriangle, Box, Locate, Info } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { useStore } from '../context/StoreContext';
 
-const MISSION_POOL = [
-  { name: "INFILTRAR DISTRITO NEÓN", diff: "HARD", time: 45 },
-  { name: "SABOTEAR DATA CENTER B", diff: "EXTREME", time: 30 },
-  { name: "EXTRAER EL ACTIVO", diff: "NORMAL", time: 60 },
-  { name: "SECUESTRAR COMBOY", diff: "INSANE", time: 20 },
-  { name: "RECUPERAR CAJA NEGRA", diff: "EASY", time: 40 },
-];
-
 export function SpinView({ onMissionAccepted }: { onMissionAccepted?: () => void }) {
   const [isSpinning, setIsSpinning] = useState(false);
   const [spinText, setSpinText] = useState('BUSCANDO MISIÓN...');
-  const [result, setResult] = useState<typeof MISSION_POOL[0] | null>(null);
-  const { state, addMission, punish } = useStore();
+  const [result, setResult] = useState<any | null>(null);
+  const { state, updateMission, punish } = useStore();
 
   const startSpin = () => {
     if (isSpinning) return;
+    
+    // Get available missions
+    const availableMissions = state.missions.filter(m => m.status === 'IDLE');
+    if (availableMissions.length === 0) {
+      soundManager.playError();
+      alert('NO HAY MISIONES DISPONIBLES EN EL TERMINAL');
+      return;
+    }
+
     soundManager.playSpinClick();
     setIsSpinning(true);
     setResult(null);
@@ -27,15 +28,15 @@ export function SpinView({ onMissionAccepted }: { onMissionAccepted?: () => void
     let loops = 0;
     const interval = setInterval(() => {
       soundManager.playSpinClick();
-      setSpinText(MISSION_POOL[Math.floor(Math.random() * MISSION_POOL.length)].name);
+      setSpinText(availableMissions[Math.floor(Math.random() * availableMissions.length)].name);
       loops++;
       if (loops > 10) {
         clearInterval(interval);
-        const randomMission = MISSION_POOL[Math.floor(Math.random() * MISSION_POOL.length)];
+        const randomMission = availableMissions[Math.floor(Math.random() * availableMissions.length)];
         setResult(randomMission);
         setIsSpinning(false);
         soundManager.playJackpot();
-        setSpinText('BUSCANDO MISIÓN...');
+        setSpinText('MISIÓN ASIGNADA');
       }
     }, 150);
   };
@@ -43,23 +44,15 @@ export function SpinView({ onMissionAccepted }: { onMissionAccepted?: () => void
   const acceptMission = () => {
     if (!result) return;
     soundManager.playAccept();
-    addMission({
-      id: Date.now().toString(),
-      name: result.name,
-      difficulty: result.diff as any,
-      location: 'UBICACIÓN CLASIFICADA',
-      durationSeconds: result.time * 60,
-      rewardCash: result.time * 50,
-      rewardRespect: result.time * 10,
-      status: 'ACTIVE',
-      timeRemaining: result.time * 60,
-      category: 'MISIÓN ALEATORIA'
-    });
+    
+    // Make the mission active
+    updateMission(result.id, { status: 'ACTIVE' });
+    
     setResult(null);
     if (onMissionAccepted) {
       onMissionAccepted();
     } else {
-      alert('MISIÓN AÑADIDA Y ACTIVADA EN EL REGISTRO DE OBJETIVOS');
+      alert('MISIÓN ACTIVADA EN EL REGISTRO DE OBJETIVOS');
     }
   };
 
@@ -121,15 +114,15 @@ export function SpinView({ onMissionAccepted }: { onMissionAccepted?: () => void
               <div className="border-2 border-outline-variant p-4 bg-background mb-6 text-left">
                 <div className="flex justify-between items-start mb-2">
                   <p className="text-xs font-bold text-outline-variant uppercase">OBJETIVO</p>
-                  <span className={`text-[10px] px-1 font-black uppercase ${getDiffColor(result.diff)}`}>
-                    {result.diff}
+                  <span className={`text-[10px] px-1 font-black uppercase ${getDiffColor(result.difficulty)}`}>
+                    {result.difficulty}
                   </span>
                 </div>
                 <p className="text-lg font-bold text-primary uppercase leading-tight mb-2">
                   {result.name}
                 </p>
                 <div className="text-tertiary text-sm font-bold uppercase flex items-center gap-2">
-                  <span className="tabular-nums">{result.time}:00</span> MIN
+                  <span className="tabular-nums">{Math.floor(result.durationSeconds / 60)}:00</span> MIN
                 </div>
               </div>
 

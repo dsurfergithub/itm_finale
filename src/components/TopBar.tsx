@@ -13,18 +13,6 @@ export function TopBar({ respect, strikes = 0, onReset }: TopBarProps) {
   return (
     <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-4 bg-background border-b-4 border-primary hard-shadow">
       <div className="flex items-center gap-2 max-w-[50%] sm:max-w-none overflow-hidden">
-        <img 
-          src="/logo.png" 
-          onError={(e) => {
-            // Fallback if they upload it as .jpg or .webp
-            const target = e.target as HTMLImageElement;
-            if (target.src.endsWith('.png')) target.src = '/logo.jpg';
-            else if (target.src.endsWith('.jpg')) target.src = '/logo.webp';
-            else target.style.display = 'none'; // Hide if still fails
-          }}
-          alt="Into the Mission Logo" 
-          className="h-10 md:h-14 object-contain rounded-md border-2 border-primary hard-shadow-sm" 
-        />
         <h1 className="text-xl md:text-3xl font-black text-primary italic tracking-tighter uppercase whitespace-nowrap overflow-hidden text-ellipsis hidden lg:block">
           INTO THE MISSION
         </h1>

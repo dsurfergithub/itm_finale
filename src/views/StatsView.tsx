@@ -1,7 +1,7 @@
 import { Database, Download, Upload } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 import { useStore } from '../context/StoreContext';
-import { useRef } from 'react';
+import React, { useRef } from 'react';
 import { getRankData } from '../utils/leveling';
 
 export function StatsView() {
