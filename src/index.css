@@ -1,95 +1,165 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;0,900;1,400;1,700;1,800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;0,900;1,400;1,700;1,800&family=Orbitron:wght@500;700;800;900&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-mono: "JetBrains Mono", monospace;
   --font-sans: "JetBrains Mono", monospace;
+  --font-display: "Orbitron", "JetBrains Mono", monospace;
 
-  /* Color Palette based on "San Andreas Grit" */
-  --color-background: #141312;
-  --color-surface: #141312;
-  --color-surface-container-lowest: #0f0e0d;
-  --color-surface-container-low: #1d1b1a;
-  --color-surface-container: #211f1e;
-  --color-surface-container-high: #2b2a28;
-  --color-surface-container-highest: #363433;
-  --color-surface-variant: #363433;
+  --color-background: #070812;
+  --color-surface: #0b1020;
+  --color-surface-container-lowest: #050713;
+  --color-surface-container-low: #0f1530;
+  --color-surface-container: #151b3a;
+  --color-surface-container-high: #1d2550;
+  --color-surface-container-highest: #273164;
+  --color-surface-variant: #22294d;
 
-  --color-on-background: #e6e1df;
-  --color-on-surface: #e6e1df;
-  --color-on-surface-variant: #dac3ad;
+  --color-on-background: #fff6f2;
+  --color-on-surface: #fff6f2;
+  --color-on-surface-variant: #c9c4e8;
 
-  --color-primary: #ffc687;
-  --color-on-primary: #482900;
-  --color-primary-container: #ff9f00;
-  --color-on-primary-container: #663d00;
+  --color-primary: #ff5fb7;
+  --color-on-primary: #220014;
+  --color-primary-container: #ff8a3d;
+  --color-on-primary-container: #250b00;
 
-  --color-secondary: #bdf4ff;
-  --color-on-secondary: #00363d;
-  --color-secondary-container: #00e3fd;
-  --color-on-secondary-container: #00616d;
+  --color-secondary: #43e8ff;
+  --color-on-secondary: #001d25;
+  --color-secondary-container: #168cff;
+  --color-on-secondary-container: #e7f7ff;
 
-  --color-tertiary: #a9e300;
-  --color-on-tertiary: #253500;
-  --color-tertiary-container: #92c500;
-  --color-on-tertiary-container: #374d00;
+  --color-tertiary: #b9ff63;
+  --color-on-tertiary: #142400;
+  --color-tertiary-container: #76ffb4;
+  --color-on-tertiary-container: #002916;
 
-  --color-error: #ffb4ab;
-  --color-on-error: #690005;
-  --color-error-container: #93000a;
-  --color-on-error-container: #ffdad6;
+  --color-error: #ff4f6d;
+  --color-on-error: #31000a;
+  --color-error-container: #8d1231;
+  --color-on-error-container: #ffe3ea;
 
-  --color-outline: #a28d79;
-  --color-outline-variant: #544433;
+  --color-outline: #9b8bc7;
+  --color-outline-variant: #4d4770;
+}
+
+:root {
+  --fx-primary: 255 95 183;
+  --fx-secondary: 67 232 255;
+  --fx-sunset: 255 138 61;
+  --fx-lime: 185 255 99;
 }
 
 @layer utilities {
   .retro-scanline {
-    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
-      linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    background: linear-gradient(rgba(18, 16, 32, 0) 50%, rgba(0, 0, 0, 0.28) 50%),
+      linear-gradient(90deg, rgba(255, 95, 183, 0.08), rgba(67, 232, 255, 0.03), rgba(255, 138, 61, 0.08));
     background-size: 100% 2px, 3px 100%;
     pointer-events: none;
   }
-  
+
   .hud-scanline {
-    background: linear-gradient(to bottom, rgba(255, 159, 0, 0.03) 50%, rgba(0, 0, 0, 0.03) 50%);
+    background: linear-gradient(to bottom, rgba(67, 232, 255, 0.06) 50%, rgba(0, 0, 0, 0.05) 50%);
     background-size: 100% 4px;
     pointer-events: none;
   }
 
   .city-grit {
-    background-image: url("https://www.transparenttextures.com/patterns/stardust.png");
-    opacity: 0.15;
+    background:
+      radial-gradient(circle at 20% 15%, rgba(var(--fx-primary), 0.22), transparent 26rem),
+      radial-gradient(circle at 85% 20%, rgba(var(--fx-sunset), 0.18), transparent 22rem),
+      radial-gradient(circle at 45% 92%, rgba(var(--fx-secondary), 0.12), transparent 24rem),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 16px);
     pointer-events: none;
   }
 
-  .hard-shadow {
-    box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
+  .vice-grid {
+    background-image:
+      linear-gradient(rgba(var(--fx-secondary), 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--fx-secondary), 0.12) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(to top, rgba(0,0,0,0.75), transparent 70%);
   }
-  
+
+  .vice-glass {
+    background: linear-gradient(135deg, rgba(21, 27, 58, 0.88), rgba(11, 16, 32, 0.72));
+    border: 1px solid rgba(var(--fx-secondary), 0.26);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+  }
+
+  .neon-panel {
+    box-shadow: 0 0 0 1px rgba(var(--fx-secondary), 0.24), 0 0 32px rgba(var(--fx-primary), 0.14), 8px 8px 0 rgba(0, 0, 0, 0.72);
+  }
+
+  .neon-text {
+    text-shadow: 0 0 10px rgba(var(--fx-primary), 0.7), 0 0 26px rgba(var(--fx-secondary), 0.3);
+  }
+
+  .cyan-text-glow {
+    text-shadow: 0 0 12px rgba(var(--fx-secondary), 0.72);
+  }
+
+  .sunset-text-glow {
+    text-shadow: 0 0 12px rgba(var(--fx-sunset), 0.72);
+  }
+
+  .hard-shadow {
+    box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9);
+  }
+
   .hard-shadow-lg {
-    box-shadow: 8px 8px 0px 0px rgba(0, 0, 0, 1);
+    box-shadow: 8px 8px 0px 0px rgba(0, 0, 0, 0.9);
   }
 
   .glow-star {
-    text-shadow: 0 0 8px #ff9f00;
+    filter: drop-shadow(0 0 7px rgba(var(--fx-sunset), 0.85));
   }
 
   .mission-passed-glow {
-    text-shadow: 0 0 8px #a9e300;
+    text-shadow: 0 0 10px rgba(var(--fx-lime), 0.85);
   }
 
   .mission-failed-glow {
-    text-shadow: 0 0 8px #ffb4ab;
+    text-shadow: 0 0 10px rgba(255, 79, 109, 0.85);
   }
 
   .timer-glow {
-    text-shadow: 0 0 15px rgba(169, 227, 0, 0.5);
+    text-shadow: 0 0 15px rgba(var(--fx-lime), 0.5);
   }
 
   .timer-glow-critical {
-    text-shadow: 0 0 15px rgba(255, 68, 68, 0.6);
+    text-shadow: 0 0 15px rgba(255, 79, 109, 0.75);
   }
+
+  .scan-beam::before {
+    content: "";
+    position: absolute;
+    inset: -30% 0 auto 0;
+    height: 45%;
+    background: linear-gradient(to bottom, transparent, rgba(var(--fx-secondary), 0.16), transparent);
+    animation: scan-beam 2.8s linear infinite;
+    pointer-events: none;
+  }
+
+  .palm-silhouette::after {
+    content: "";
+    position: absolute;
+    right: -2rem;
+    bottom: -1rem;
+    width: 12rem;
+    height: 12rem;
+    opacity: 0.12;
+    background:
+      radial-gradient(ellipse at 50% 0%, currentColor 0 8%, transparent 9%),
+      linear-gradient(100deg, transparent 45%, currentColor 46% 51%, transparent 52%);
+    transform: rotate(-12deg);
+  }
+}
+
+@keyframes scan-beam {
+  0% { transform: translateY(-20%); }
+  100% { transform: translateY(280%); }
 }
 
 body {
@@ -103,14 +173,19 @@ input, select, textarea {
   font-size: 16px !important;
 }
 
-/* Custom Scrollbar for Retro Feel */
+button, a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: var(--color-surface-container);
 }
+
 ::-webkit-scrollbar-thumb {
-  background: var(--color-primary-container);
+  background: linear-gradient(var(--color-primary), var(--color-secondary));
   border: 1px solid var(--color-background);
 }
