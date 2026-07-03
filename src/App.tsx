@@ -1,4 +1,4 @@
-import { useState, StrictMode } from 'react';
+import { useState } from 'react';
 import { TopBar } from './components/TopBar';
 import { BottomNav } from './components/BottomNav';
 import { MissionsView } from './views/MissionsView';
@@ -17,13 +17,16 @@ function AppContent() {
   const { state, resetAll } = useStore();
 
   const handleReset = () => {
+    const confirmed = window.confirm('¿Reiniciar toda la partida? Se borrarán misiones, progreso, créditos y registro local.');
+    if (!confirmed) return;
+
     soundManager.playAlert();
     setShowMeme(true);
     setTimeout(() => {
       resetAll();
       setActiveTab('MISSIONS');
       setShowMeme(false);
-    }, 3000);
+    }, 2500);
   };
 
   const renderView = () => {
@@ -46,13 +49,15 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background relative flex flex-col selection:bg-primary-container selection:text-on-primary-container">
-      {/* Global Retro Overlays */}
+    <div className="min-h-[100dvh] bg-background relative flex flex-col selection:bg-primary selection:text-on-primary overflow-hidden">
       <div className="fixed inset-0 city-grit z-0" />
-      <div className="retro-scanline fixed inset-0 z-40 opacity-10 pointer-events-none" />
+      <div className="fixed inset-x-0 bottom-0 h-1/2 vice-grid z-0 opacity-70" />
+      <div className="fixed inset-0 retro-scanline z-40 opacity-10 pointer-events-none" />
+      <div className="fixed -left-32 top-24 h-64 w-64 rounded-full bg-primary/20 blur-3xl z-0" />
+      <div className="fixed -right-24 top-10 h-72 w-72 rounded-full bg-secondary/10 blur-3xl z-0" />
 
       {showMeme && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center animate-in fade-in duration-300">
           <img 
             src="/here_we_go_again.png" 
             onError={(e) => {
@@ -60,13 +65,14 @@ function AppContent() {
               if (target.src.endsWith('.png')) target.src = '/here_we_go_again.jpg';
               else target.src = 'https://i.kym-cdn.com/entries/icons/original/000/029/322/ahshit.jpg';
             }}
-            alt="Here we go again" 
+            alt="Reset en curso" 
             className="max-w-full max-h-[70vh] object-contain px-4 drop-shadow-2xl"
           />
+          <p className="mt-4 text-primary font-black uppercase tracking-[0.35em] animate-pulse">Reiniciando partida</p>
         </div>
       )}
 
-      <TopBar respect={state.respect} strikes={state.strikes} onReset={handleReset} />
+      <TopBar respect={state.respect} credits={state.credits} strikes={state.strikes} onReset={handleReset} />
       
       <main className="flex-grow relative z-10 w-full overflow-x-hidden">
         {renderView()}
@@ -84,4 +90,3 @@ export default function App() {
     </StoreProvider>
   );
 }
-
