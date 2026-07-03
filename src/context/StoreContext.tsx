@@ -49,13 +49,13 @@ const defaultState: AppState = {
     }
   ],
   rewards: [
-    { id: '1', name: 'NUEVA IDENTIDAD', cost: 100000 },
-    { id: '2', name: 'CONTACTO EN LA POLICÍA', cost: 15000 },
-    { id: '3', name: 'PISO FRANCO EN EL CENTRO', cost: 55000 }
+    { id: '1', name: 'DÍA LIBRE', cost: 100000 },
+    { id: '2', name: 'CENA ESPECIAL', cost: 15000 },
+    { id: '3', name: 'ESCAPADA DE FIN DE SEMANA', cost: 55000 }
   ],
   logs: [
-    { id: '1', name: 'ATRACO DE NEÓN', timestamp: '2023.10.24 // 22:45', points: 5000, type: 'RESPECT', passed: true },
-    { id: '2', name: 'PERSECUCIÓN CENTRO', timestamp: '2023.10.23 // 14:12', points: -1200, type: 'CREDITS', passed: false },
+    { id: '1', name: 'MISIÓN DE NEÓN', timestamp: '2023.10.24 // 22:45', points: 5000, type: 'RESPECT', passed: true },
+    { id: '2', name: 'OBJETIVO POSPUESTO', timestamp: '2023.10.23 // 14:12', points: -1200, type: 'CREDITS', passed: false },
     { id: '3', name: 'RECUPERACIÓN INTEL', timestamp: '2023.10.22 // 03:20', points: 2500, type: 'RESPECT', passed: true },
   ],
   categories: [
@@ -89,11 +89,36 @@ const blankState: AppState = {
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
+function loadSavedState(): AppState {
+  if (typeof window === 'undefined') return defaultState;
+
+  const saved = localStorage.getItem('itm_state');
+  if (!saved) return defaultState;
+
+  try {
+    const parsed = JSON.parse(saved) as Partial<AppState>;
+    return {
+      ...defaultState,
+      ...parsed,
+      missions: Array.isArray(parsed.missions) ? parsed.missions : defaultState.missions,
+      rewards: Array.isArray(parsed.rewards) ? parsed.rewards : defaultState.rewards,
+      logs: Array.isArray(parsed.logs) ? parsed.logs : defaultState.logs,
+      categories: Array.isArray(parsed.categories) ? parsed.categories : defaultState.categories,
+      stats: {
+        ...defaultState.stats,
+        ...(parsed.stats || {}),
+        activity: Array.isArray(parsed.stats?.activity) ? parsed.stats.activity : defaultState.stats.activity,
+      },
+    };
+  } catch (error) {
+    console.warn('Estado local corrupto. Se reinicia con valores por defecto.', error);
+    localStorage.removeItem('itm_state');
+    return defaultState;
+  }
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem('itm_state');
-    return saved ? { ...defaultState, ...JSON.parse(saved) } : defaultState;
-  });
+  const [state, setState] = useState<AppState>(loadSavedState);
 
   useEffect(() => {
     localStorage.setItem('itm_state', JSON.stringify(state));
@@ -138,7 +163,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!mission) return prev;
       
       const newStrikes = (prev.strikes || 0) + 1;
-      let nextState = {
+      const nextState: AppState = {
         ...prev,
         missions: prev.missions.filter(m => m.id !== id),
         strikes: newStrikes
@@ -220,7 +245,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
 
       const finishDate = new Date();
-      
       const elapsedMinutes = Math.floor((mission.durationSeconds - (mission.timeRemaining || 0)) / 60);
       const timeStr = elapsedMinutes > 0 ? ` (${elapsedMinutes} MIN)` : '';
 
@@ -237,10 +261,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...prev.stats,
         totalMissions: prev.stats.totalMissions + 1,
         score: prev.stats.score + mission.rewardCash + mission.rewardRespect,
-        streak: prev.stats.streak + 1, // simple logic for streak
+        streak: prev.stats.streak + 1,
         activity: [...prev.stats.activity]
       };
-      // Increase today's activity percentage up to 100 max
       newStats.activity[6] = Math.min(100, newStats.activity[6] + 15);
 
       let updatedCategories = [...prev.categories];
@@ -289,7 +312,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
 
       const newStrikes = (prev.strikes || 0) + 1;
-      let nextState = {
+      const nextState: AppState = {
         ...prev,
         strikes: newStrikes,
         respect: Math.max(0, prev.respect - Math.floor(mission.rewardRespect / 2)),
@@ -333,12 +356,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Check for day shift
     const lastDate = localStorage.getItem('itm_last_date');
     const today = new Date().toLocaleDateString();
     
     if (lastDate && lastDate !== today) {
-      // Day changed! Shift the activity array
       setState(prev => {
         const newActivity = [...prev.stats.activity.slice(1), 0];
         return {
@@ -350,7 +371,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('itm_last_date', today);
   }, []);
 
-  // Global timer for missions
   useEffect(() => {
     const interval = setInterval(() => {
       setState(prev => {
