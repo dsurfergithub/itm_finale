@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#ff9a5a"/>
+      <stop offset="0.5" stop-color="#ff4f8b"/>
+      <stop offset="1" stop-color="#5b2fb0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g >
+    <circle cx="256" cy="250" r="150" fill="#ffd27a" opacity="0.55"/>
+    <g transform="translate(256 240) skewX(-8) translate(-256 -240)">
+      <g fill="#1b0f1e" opacity="0.35" transform="translate(0 10)">
+  <rect x="66" y="150" width="48" height="180"/>
+  <rect x="130" y="150" width="130" height="46"/>
+  <rect x="171" y="150" width="48" height="180"/>
+  <path d="M276 330 V150 H326 L361 232 L396 150 H446 V330 H402 V236 L374 300 H348 L320 236 V330 Z"/></g>
+      <g fill="#fbeee0">
+  <rect x="66" y="150" width="48" height="180"/>
+  <rect x="130" y="150" width="130" height="46"/>
+  <rect x="171" y="150" width="48" height="180"/>
+  <path d="M276 330 V150 H326 L361 232 L396 150 H446 V330 H402 V236 L374 300 H348 L320 236 V330 Z"/></g>
+    </g>
+  </g>
+  <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath><path clip-path="url(#tile)" d="M0,420 H40 V372 H78 V398 H112 V350 H150 V404 H360 V362 H392 V340 H430 V388 H472 V366 H512 V512 H0Z" fill="#1b0f1e" opacity="0.9"/>
+</svg>

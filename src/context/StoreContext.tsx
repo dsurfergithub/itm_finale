@@ -1,406 +1,457 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { AppState, Mission, LogEntry, Category, Reward } from '../types';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityEvent, AppState, Difficulty, District, Mission, Reward, Settings } from '../types';
+import { createMission, getElapsedMs, MissionDraft, newId } from '../lib/missions';
+import { createBlankState, loadState, saveState, trimEvents } from '../lib/persistence';
+import { getRankIndex, Rank, RANKS } from '../lib/ranks';
+import { dayKey } from '../lib/time';
+import { repairableDay } from '../lib/streak';
+import { soundManager } from '../utils/audio';
+
+export const DAILY_BONUS = 2000;
+export const STREAK_REPAIR_COST = 3000;
+export const CLEAR_STRIKE_COST = 5000;
+const MAX_STRIKES = 10;
+
+export interface CompletionOutcome {
+  credits: number;
+  respect: number;
+  rankUp?: Rank;
+  campaignCompleted?: { name: string; bonus: number };
+}
 
 interface StoreContextType {
   state: AppState;
-  updateState: (newState: Partial<AppState>) => void;
+  /** Restores a snapshot returned by any mutating action. */
+  restore: (snapshot: AppState) => void;
+  replaceState: (next: AppState) => void;
   resetAll: () => void;
-  addMission: (mission: Mission) => void;
-  updateMission: (id: string, updates: Partial<Mission>) => void;
-  completeMission: (id: string) => void;
-  failMission: (id: string) => void;
-  addLog: (log: LogEntry) => void;
-  addCategory: (name: string) => void;
-  removeCategory: (id: string) => void;
-  removeMission: (id: string) => void;
-  punish: () => void;
-  addReward: (reward: Reward) => void;
-  buyReward: (id: string) => void;
+
+  addMission: (draft: MissionDraft) => Mission;
+  addMissions: (drafts: MissionDraft[]) => void;
+  updateMission: (id: string, patch: Partial<Mission>) => void;
+  duplicateMission: (id: string) => void;
+  removeMission: (id: string) => AppState;
+  archiveMission: (id: string, archived: boolean) => AppState;
+  toggleFeatured: (id: string) => void;
+
+  startMission: (id: string) => void;
+  pauseMission: (id: string) => void;
+  resetTimer: (id: string) => void;
+  completeMission: (id: string) => { snapshot: AppState; outcome: CompletionOutcome } | null;
+  failMission: (id: string) => AppState;
+  /** Scanner rejection: only costs something in demanding mode. */
+  rejectSuggestion: () => void;
+
+  addCampaign: (input: { name: string; category: string; steps: string[]; minutes: number; difficulty: Difficulty; rewardCash: number; rewardRespect: number }) => void;
+  removeCampaign: (id: string) => AppState;
+
+  addDistrict: (name: string) => void;
+  updateDistrict: (id: string, patch: Partial<Pick<District, 'name' | 'weeklyTarget'>>) => void;
+  removeDistrict: (id: string) => AppState;
+
+  addReward: (reward: Omit<Reward, 'id'>) => void;
+  updateReward: (id: string, patch: Partial<Reward>) => void;
+  removeReward: (id: string) => AppState;
+  redeemReward: (id: string) => AppState | null;
+  setSavingGoal: (id: string | undefined) => void;
+  claimDailyBonus: () => boolean;
+  repairStreak: () => boolean;
+  clearStrike: () => boolean;
+
+  updateSettings: (patch: Partial<Settings>) => void;
 }
-
-const defaultState: AppState = {
-  respect: 2450,
-  credits: 14500,
-  strikes: 0,
-  missions: [
-    {
-      id: '1',
-      name: 'LIMPIAR EL SECTOR',
-      difficulty: 'HARD',
-      location: 'OFICINA CENTRO',
-      durationSeconds: 45 * 60,
-      rewardCash: 5000,
-      rewardRespect: 500,
-      status: 'IDLE',
-      timeRemaining: 45 * 60,
-      category: 'TRABAJO'
-    },
-    {
-      id: '2',
-      name: 'RECUPERAR DATOS',
-      difficulty: 'EASY',
-      location: 'CIBERCAFÉ',
-      durationSeconds: 15 * 60,
-      rewardCash: 1200,
-      rewardRespect: 150,
-      status: 'IDLE',
-      timeRemaining: 15 * 60,
-      category: 'TRABAJO'
-    }
-  ],
-  rewards: [
-    { id: '1', name: 'DÍA LIBRE', cost: 100000 },
-    { id: '2', name: 'CENA ESPECIAL', cost: 15000 },
-    { id: '3', name: 'ESCAPADA DE FIN DE SEMANA', cost: 55000 }
-  ],
-  logs: [
-    { id: '1', name: 'MISIÓN DE NEÓN', timestamp: '2023.10.24 // 22:45', points: 5000, type: 'RESPECT', passed: true },
-    { id: '2', name: 'OBJETIVO POSPUESTO', timestamp: '2023.10.23 // 14:12', points: -1200, type: 'CREDITS', passed: false },
-    { id: '3', name: 'RECUPERACIÓN INTEL', timestamp: '2023.10.22 // 03:20', points: 2500, type: 'RESPECT', passed: true },
-  ],
-  categories: [
-    { id: '1', name: 'TRABAJO', percentage: 85, label: 'EL CAPO' },
-    { id: '2', name: 'SALUD', percentage: 60, label: 'ATLETA' },
-    { id: '3', name: 'OCIO', percentage: 30, label: 'NOVATO' }
-  ],
-  stats: {
-    streak: 12,
-    totalMissions: 142,
-    score: 1240500,
-    activity: [40, 60, 90, 30, 75, 100, 20]
-  }
-};
-
-const blankState: AppState = {
-  respect: 0,
-  credits: 0,
-  strikes: 0,
-  missions: [],
-  rewards: [],
-  logs: [],
-  categories: [],
-  stats: {
-    streak: 0,
-    totalMissions: 0,
-    score: 0,
-    activity: [0, 0, 0, 0, 0, 0, 0]
-  }
-};
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
-function loadSavedState(): AppState {
-  if (typeof window === 'undefined') return defaultState;
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-  const saved = localStorage.getItem('itm_state');
-  if (!saved) return defaultState;
-
-  try {
-    const parsed = JSON.parse(saved) as Partial<AppState>;
-    return {
-      ...defaultState,
-      ...parsed,
-      missions: Array.isArray(parsed.missions) ? parsed.missions : defaultState.missions,
-      rewards: Array.isArray(parsed.rewards) ? parsed.rewards : defaultState.rewards,
-      logs: Array.isArray(parsed.logs) ? parsed.logs : defaultState.logs,
-      categories: Array.isArray(parsed.categories) ? parsed.categories : defaultState.categories,
-      stats: {
-        ...defaultState.stats,
-        ...(parsed.stats || {}),
-        activity: Array.isArray(parsed.stats?.activity) ? parsed.stats.activity : defaultState.stats.activity,
-      },
-    };
-  } catch (error) {
-    console.warn('Estado local corrupto. Se reinicia con valores por defecto.', error);
-    localStorage.removeItem('itm_state');
-    return defaultState;
+function ensureDistricts(districts: District[], names: string[]): District[] {
+  const next = [...districts];
+  for (const name of names) {
+    if (name.trim() && !next.some(d => sameName(d.name, name))) {
+      next.push({ id: newId(), name: name.trim(), completions: 0, weeklyTarget: 0 });
+    }
   }
+  return next;
+}
+
+function event(kind: ActivityEvent['kind'], title: string, extra: Partial<ActivityEvent> = {}): ActivityEvent {
+  return { id: newId(), kind, title, at: Date.now(), ...extra };
+}
+
+/** Freezes a running timer into `elapsedMs`. */
+function freeze(m: Mission, now: number): Mission {
+  if (m.status !== 'ACTIVE') return m;
+  return { ...m, status: 'PAUSED', elapsedMs: getElapsedMs(m, now), startedAt: undefined };
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(loadSavedState);
+  const [state, setState] = useState<AppState>(loadState);
+  const stateRef = useRef(state);
+
+  // Actions run against the latest committed state so they can return snapshots for "Deshacer".
+  const apply = useCallback((fn: (prev: AppState) => AppState) => {
+    const prev = stateRef.current;
+    const next = fn(prev);
+    if (next !== prev) {
+      stateRef.current = next;
+      setState(next);
+    }
+    return prev;
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('itm_state', JSON.stringify(state));
+    saveState(state);
   }, [state]);
 
-  const updateState = (newState: Partial<AppState>) => {
-    setState(prev => ({ ...prev, ...newState }));
-  };
+  useEffect(() => {
+    soundManager.configure(state.settings.soundEnabled, state.settings.volume);
+  }, [state.settings.soundEnabled, state.settings.volume]);
 
-  const handleGameOver = (prev: AppState, cause: string): AppState => {
-    if (typeof window !== 'undefined') {
-      alert(`¡SISTEMA COMPROMETIDO! ALCANZASTE 10 ESTRELLAS DE PENALIZACIÓN. SE HA CONFISCADO LA MITAD DE TU RESPETO Y TODOS TUS CRÉDITOS.\nCAUSA: ${cause}`);
-    }
-    const gameoverLog: LogEntry = {
-      id: Date.now().toString() + Math.random(),
-      name: `GAME OVER: ${cause}`,
-      timestamp: new Date().toLocaleString(),
-      points: -Math.floor(prev.respect / 2),
-      type: 'RESPECT',
-      passed: false
+  // Moves finished timers to VERIFY. Remaining time is derived from timestamps,
+  // so this also catches timers that ended while the app was closed.
+  useEffect(() => {
+    const check = () => {
+      const now = Date.now();
+      const due = stateRef.current.missions.some(
+        m => m.status === 'ACTIVE' && getElapsedMs(m, now) >= m.durationSeconds * 1000,
+      );
+      if (!due) return;
+      apply(prev => ({
+        ...prev,
+        missions: prev.missions.map(m => {
+          if (m.status !== 'ACTIVE' || getElapsedMs(m, now) < m.durationSeconds * 1000) return m;
+          const total = m.durationSeconds * 1000;
+          return { ...m, status: 'VERIFY', elapsedMs: total, finishedAt: (m.startedAt ?? now) + (total - m.elapsedMs), startedAt: undefined };
+        }),
+      }));
+      if (document.visibilityState === 'visible') soundManager.playAlert();
     };
+    check();
+    const interval = window.setInterval(check, 1000);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [apply]);
+
+  const mapMission = (id: string, fn: (m: Mission) => Mission) =>
+    apply(prev => ({ ...prev, missions: prev.missions.map(m => (m.id === id ? fn(m) : m)) }));
+
+  const actions = useMemo<Omit<StoreContextType, 'state'>>(() => {
+    const addPenaltyStrike = (s: AppState, cause: string): AppState => {
+      if (s.settings.mode !== 'DEMANDING') return s;
+      const strikes = s.strikes + 1;
+      if (strikes < MAX_STRIKES) return { ...s, strikes };
+      const lost = Math.floor(s.credits / 2);
+      return {
+        ...s,
+        strikes: 0,
+        credits: s.credits - lost,
+        events: trimEvents([event('PENALTY', `Diez estrellas: pierdes la mitad de tus créditos (${cause})`, { credits: -lost }), ...s.events]),
+      };
+    };
+
     return {
-      ...prev,
-      strikes: 0,
-      respect: Math.floor(prev.respect / 2),
-      credits: 0,
-      logs: [gameoverLog, ...prev.logs]
-    };
-  };
+      restore: snapshot => apply(() => snapshot),
+      replaceState: next => apply(() => next),
+      resetAll: () => apply(prev => ({ ...createBlankState(), settings: prev.settings })),
 
-  const punish = () => {
-    setState(prev => {
-      const newStrikes = (prev.strikes || 0) + 1;
-      if (newStrikes >= 10) return handleGameOver({ ...prev, strikes: newStrikes }, 'MÚLTIPLES INFRACCIONES');
-      return { ...prev, strikes: newStrikes };
-    });
-  };
+      addMission: draft => {
+        const mission = createMission(draft);
+        apply(prev => ({ ...prev, missions: [mission, ...prev.missions], districts: ensureDistricts(prev.districts, [mission.category]) }));
+        return mission;
+      },
 
-  const removeMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission) return prev;
-      
-      const newStrikes = (prev.strikes || 0) + 1;
-      const nextState: AppState = {
-        ...prev,
-        missions: prev.missions.filter(m => m.id !== id),
-        strikes: newStrikes
-      };
-      
-      if (newStrikes >= 10) {
-        return handleGameOver(nextState, 'MISIÓN ELIMINADA');
-      }
-      return nextState;
-    });
-  };
-
-  const addReward = (reward: Reward) => {
-    setState(prev => ({
-      ...prev,
-      rewards: [...(prev.rewards || []), reward]
-    }));
-  };
-
-  const buyReward = (id: string) => {
-    setState(prev => {
-      const reward = prev.rewards?.find(r => r.id === id);
-      if (!reward || prev.credits < reward.cost) return prev;
-      
-      const newLog: LogEntry = {
-        id: Date.now().toString(),
-        name: `COMPRA: ${reward.name}`,
-        timestamp: new Date().toLocaleString(),
-        points: -reward.cost,
-        type: 'CREDITS',
-        passed: false
-      };
-
-      return {
-        ...prev,
-        credits: prev.credits - reward.cost,
-        rewards: prev.rewards?.filter(r => r.id !== id) || [],
-        logs: [newLog, ...prev.logs]
-      };
-    });
-  };
-
-  const resetAll = () => {
-    setState(blankState);
-  };
-
-  const addMission = (mission: Mission) => {
-    setState(prev => {
-      const categoryExists = prev.categories.some(c => c.name === mission.category);
-      let newCategories = prev.categories;
-      
-      if (!categoryExists && mission.category) {
-        newCategories = [...prev.categories, {
-           id: Date.now().toString() + Math.random(),
-           name: mission.category,
-           percentage: 0,
-           label: 'NUEVO'
-        }];
-      }
-
-      return { 
-        ...prev, 
-        categories: newCategories,
-        missions: [mission, ...prev.missions] 
-      };
-    });
-  };
-
-  const updateMission = (id: string, updates: Partial<Mission>) => {
-    setState(prev => ({
-      ...prev,
-      missions: prev.missions.map(m => m.id === id ? { ...m, ...updates } : m)
-    }));
-  };
-
-  const completeMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
-
-      const finishDate = new Date();
-      const elapsedMinutes = Math.floor((mission.durationSeconds - (mission.timeRemaining || 0)) / 60);
-      const timeStr = elapsedMinutes > 0 ? ` (${elapsedMinutes} MIN)` : '';
-
-      const passedLog: LogEntry = {
-        id: Date.now().toString(),
-        name: mission.name + timeStr,
-        timestamp: finishDate.toLocaleString(),
-        points: mission.rewardRespect,
-        type: 'RESPECT',
-        passed: true
-      };
-
-      const newStats = {
-        ...prev.stats,
-        totalMissions: prev.stats.totalMissions + 1,
-        score: prev.stats.score + mission.rewardCash + mission.rewardRespect,
-        streak: prev.stats.streak + 1,
-        activity: [...prev.stats.activity]
-      };
-      newStats.activity[6] = Math.min(100, newStats.activity[6] + 15);
-
-      let updatedCategories = [...prev.categories];
-      const catIndex = updatedCategories.findIndex(c => c.name === mission.category);
-      if (catIndex !== -1) {
-        const cat = updatedCategories[catIndex];
-        const newPct = Math.min(100, cat.percentage + Math.max(1, Math.floor(mission.rewardRespect / 100)));
-        let newLabel = cat.label;
-        if (newPct >= 100) newLabel = 'EL CAPO';
-        else if (newPct >= 75) newLabel = 'VETERANO';
-        else if (newPct >= 50) newLabel = 'AVANZADO';
-        else if (newPct >= 20) newLabel = 'ACTIVO';
-        
-        updatedCategories[catIndex] = {
-           ...cat,
-           percentage: newPct,
-           label: newLabel
-        };
-      }
-
-      return {
-        ...prev,
-        categories: updatedCategories,
-        respect: prev.respect + mission.rewardRespect,
-        credits: prev.credits + mission.rewardCash,
-        missions: prev.missions.map(m => m.id === id ? { ...m, status: 'PASSED' } as Mission : m),
-        logs: [passedLog, ...prev.logs],
-        stats: newStats
-      };
-    });
-  };
-
-  const failMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
-
-      const finishDate = new Date();
-      const failedLog: LogEntry = {
-        id: Date.now().toString(),
-        name: `FALLO: ${mission.name}`,
-        timestamp: finishDate.toLocaleString(),
-        points: -Math.floor(mission.rewardRespect / 2),
-        type: 'RESPECT',
-        passed: false
-      };
-
-      const newStrikes = (prev.strikes || 0) + 1;
-      const nextState: AppState = {
-        ...prev,
-        strikes: newStrikes,
-        respect: Math.max(0, prev.respect - Math.floor(mission.rewardRespect / 2)),
-        missions: prev.missions.map(m => m.id === id ? { ...m, status: 'FAILED' } as Mission : m),
-        logs: [failedLog, ...prev.logs],
-        stats: {
-          ...prev.stats,
-          streak: 0
-        }
-      };
-
-      if (newStrikes >= 10) {
-        return handleGameOver(nextState, `FALLO EN ${mission.name}`);
-      }
-      
-      return nextState;
-    });
-  };
-
-  const addLog = (log: LogEntry) => {
-    setState(prev => ({ ...prev, logs: [log, ...prev.logs] }));
-  };
-
-  const addCategory = (name: string) => {
-    setState(prev => ({
-      ...prev,
-      categories: [...prev.categories, {
-        id: Date.now().toString(),
-        name,
-        percentage: 0,
-        label: 'NOVATO'
-      }]
-    }));
-  };
-
-  const removeCategory = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      categories: prev.categories.filter(c => c.id !== id)
-    }));
-  };
-
-  useEffect(() => {
-    const lastDate = localStorage.getItem('itm_last_date');
-    const today = new Date().toLocaleDateString();
-    
-    if (lastDate && lastDate !== today) {
-      setState(prev => {
-        const newActivity = [...prev.stats.activity.slice(1), 0];
-        return {
+      addMissions: drafts => {
+        const missions = drafts.map(d => createMission(d));
+        apply(prev => ({
           ...prev,
-          stats: { ...prev.stats, activity: newActivity }
-        };
-      });
-    }
-    localStorage.setItem('itm_last_date', today);
-  }, []);
+          missions: [...missions, ...prev.missions],
+          districts: ensureDistricts(prev.districts, missions.map(m => m.category)),
+        }));
+      },
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setState(prev => {
-        let changed = false;
-        const newMissions = prev.missions.map(m => {
-          if (m.status === 'ACTIVE' && m.timeRemaining !== undefined && m.timeRemaining > 0) {
-            changed = true;
-            const newTime = m.timeRemaining - 1;
-            if (newTime <= 0) {
-              return { ...m, status: 'VERIFY', timeRemaining: 0 } as Mission;
-            }
-            return { ...m, timeRemaining: newTime };
+      updateMission: (id, patch) =>
+        apply(prev => ({
+          ...prev,
+          missions: prev.missions.map(m => (m.id === id ? { ...m, ...patch } : m)),
+          districts: patch.category ? ensureDistricts(prev.districts, [patch.category]) : prev.districts,
+        })),
+
+      duplicateMission: id =>
+        apply(prev => {
+          const index = prev.missions.findIndex(m => m.id === id);
+          if (index === -1) return prev;
+          const source = prev.missions[index];
+          const copy: Mission = {
+            ...source,
+            id: newId(),
+            name: `${source.name} (copia)`,
+            status: 'IDLE',
+            elapsedMs: 0,
+            startedAt: undefined,
+            finishedAt: undefined,
+            lastCompletedAt: undefined,
+            archived: false,
+            featured: false,
+            campaignId: undefined,
+            campaignStep: undefined,
+            createdAt: Date.now(),
+          };
+          const missions = [...prev.missions];
+          missions.splice(index + 1, 0, copy);
+          return { ...prev, missions };
+        }),
+
+      removeMission: id => apply(prev => ({ ...prev, missions: prev.missions.filter(m => m.id !== id) })),
+
+      archiveMission: (id, archived) =>
+        mapMission(id, m => ({ ...freeze(m, Date.now()), archived, featured: archived ? false : m.featured })),
+
+      toggleFeatured: id =>
+        apply(prev => ({
+          ...prev,
+          missions: prev.missions.map(m => ({ ...m, featured: m.id === id ? !m.featured : false })),
+        })),
+
+      startMission: id =>
+        apply(prev => {
+          const now = Date.now();
+          return {
+            ...prev,
+            // One mission in focus at a time: starting one pauses the rest.
+            missions: prev.missions.map(m =>
+              m.id === id ? { ...m, status: 'ACTIVE', startedAt: now, archived: false } : freeze(m, now),
+            ),
+          };
+        }),
+
+      pauseMission: id => mapMission(id, m => freeze(m, Date.now())),
+
+      resetTimer: id =>
+        mapMission(id, m => ({ ...m, status: 'IDLE', elapsedMs: 0, startedAt: undefined, finishedAt: undefined })),
+
+      completeMission: id => {
+        const current = stateRef.current;
+        const mission = current.missions.find(m => m.id === id);
+        if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return null;
+
+        const now = Date.now();
+        const minutes = Math.max(1, Math.round(getElapsedMs(mission, now) / 60000));
+        const outcome: CompletionOutcome = { credits: mission.rewardCash, respect: mission.rewardRespect };
+
+        const snapshot = apply(prev => {
+          const respect = prev.respect + mission.rewardRespect;
+          const events: ActivityEvent[] = [
+            event('MISSION_COMPLETED', mission.name, {
+              credits: mission.rewardCash,
+              respect: mission.rewardRespect,
+              category: mission.category,
+              minutes,
+              missionId: mission.id,
+            }),
+          ];
+
+          const before = getRankIndex(prev.respect);
+          const after = getRankIndex(respect);
+          if (after > before) {
+            outcome.rankUp = RANKS[after];
+            events.unshift(event('RANK_UP', `Nuevo rango: ${RANKS[after].name}`));
           }
-          return m;
-        });
-        
-        if (changed) {
-          return { ...prev, missions: newMissions };
-        }
-        return prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
-  return (
-    <StoreContext.Provider value={{ state, updateState, resetAll, addMission, updateMission, removeMission, completeMission, failMission, addLog, addCategory, removeCategory, punish, addReward, buyReward }}>
-      {children}
-    </StoreContext.Provider>
-  );
+          let missions = prev.missions.map<Mission>(m => {
+            if (m.id !== id) return m;
+            const base = { ...m, startedAt: undefined, featured: false };
+            return m.recurrence === 'NONE'
+              ? { ...base, status: 'PASSED', finishedAt: now, elapsedMs: getElapsedMs(m, now) }
+              : { ...base, status: 'IDLE', elapsedMs: 0, finishedAt: undefined, lastCompletedAt: now };
+          });
+
+          let credits = prev.credits + mission.rewardCash;
+          let campaigns = prev.campaigns;
+          const campaign = mission.campaignId ? prev.campaigns.find(c => c.id === mission.campaignId) : undefined;
+          if (campaign && !campaign.completedAt) {
+            const steps = missions.filter(m => m.campaignId === campaign.id);
+            if (steps.every(m => m.status === 'PASSED')) {
+              const bonus = 1000 + steps.length * 500;
+              credits += bonus;
+              outcome.campaignCompleted = { name: campaign.name, bonus };
+              campaigns = prev.campaigns.map(c => (c.id === campaign.id ? { ...c, completedAt: now } : c));
+              events.unshift(event('CAMPAIGN_COMPLETED', `Campaña completada: ${campaign.name}`, { credits: bonus }));
+            }
+          }
+
+          const today = dayKey(now);
+          const districts = ensureDistricts(prev.districts, [mission.category]).map(d =>
+            sameName(d.name, mission.category) ? { ...d, completions: d.completions + 1 } : d,
+          );
+
+          return {
+            ...prev,
+            respect,
+            credits,
+            missions,
+            campaigns,
+            districts,
+            events: trimEvents([...events, ...prev.events]),
+            activeDays: prev.activeDays.includes(today) ? prev.activeDays : [...prev.activeDays, today].sort(),
+            totalMissions: prev.totalMissions + 1,
+            score: prev.score + mission.rewardCash + mission.rewardRespect,
+          };
+        });
+        return { snapshot, outcome };
+      },
+
+      failMission: id =>
+        apply(prev => {
+          const mission = prev.missions.find(m => m.id === id);
+          if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
+          const now = Date.now();
+          const loss = prev.settings.mode === 'RELAXED' ? 0 : Math.floor(mission.rewardRespect / 2);
+          const next: AppState = {
+            ...prev,
+            respect: Math.max(0, prev.respect - loss),
+            missions: prev.missions.map<Mission>(m => {
+              if (m.id !== id) return m;
+              return m.recurrence === 'NONE'
+                ? { ...m, status: 'FAILED', startedAt: undefined, finishedAt: now, featured: false }
+                : { ...m, status: 'IDLE', elapsedMs: 0, startedAt: undefined, finishedAt: undefined };
+            }),
+            events: trimEvents([
+              event('MISSION_FAILED', mission.name, { respect: loss ? -loss : undefined, category: mission.category, missionId: id }),
+              ...prev.events,
+            ]),
+          };
+          return addPenaltyStrike(next, mission.name);
+        }),
+
+      rejectSuggestion: () => apply(prev => addPenaltyStrike(prev, 'misión rechazada')),
+
+      addCampaign: ({ name, category, steps, minutes, difficulty, rewardCash, rewardRespect }) =>
+        apply(prev => {
+          const id = newId();
+          const missions = steps.map((step, i) =>
+            createMission(
+              { name: step, difficulty, location: '', minutes, rewardCash, rewardRespect, category, recurrence: 'NONE' },
+              { campaignId: id, campaignStep: i },
+            ),
+          );
+          return {
+            ...prev,
+            campaigns: [{ id, name: name.trim(), category: category.trim(), createdAt: Date.now() }, ...prev.campaigns],
+            missions: [...missions, ...prev.missions],
+            districts: ensureDistricts(prev.districts, [category]),
+          };
+        }),
+
+      removeCampaign: id =>
+        apply(prev => ({
+          ...prev,
+          campaigns: prev.campaigns.filter(c => c.id !== id),
+          // Finished steps stay in the history; pending steps go with the campaign.
+          missions: prev.missions
+            .filter(m => m.campaignId !== id || m.status === 'PASSED')
+            .map(m => (m.campaignId === id ? { ...m, campaignId: undefined, campaignStep: undefined } : m)),
+        })),
+
+      addDistrict: name => apply(prev => ({ ...prev, districts: ensureDistricts(prev.districts, [name]) })),
+
+      updateDistrict: (id, patch) =>
+        apply(prev => {
+          const district = prev.districts.find(d => d.id === id);
+          if (!district) return prev;
+          const renamed = patch.name && !sameName(patch.name, district.name) ? patch.name.trim() : undefined;
+          return {
+            ...prev,
+            districts: prev.districts.map(d => (d.id === id ? { ...d, ...patch, name: renamed ?? d.name } : d)),
+            missions: renamed
+              ? prev.missions.map(m => (sameName(m.category, district.name) ? { ...m, category: renamed } : m))
+              : prev.missions,
+            campaigns: renamed
+              ? prev.campaigns.map(c => (sameName(c.category, district.name) ? { ...c, category: renamed } : c))
+              : prev.campaigns,
+          };
+        }),
+
+      removeDistrict: id => apply(prev => ({ ...prev, districts: prev.districts.filter(d => d.id !== id) })),
+
+      addReward: reward => apply(prev => ({ ...prev, rewards: [...prev.rewards, { ...reward, id: newId() }] })),
+
+      updateReward: (id, patch) =>
+        apply(prev => ({ ...prev, rewards: prev.rewards.map(r => (r.id === id ? { ...r, ...patch } : r)) })),
+
+      removeReward: id =>
+        apply(prev => ({
+          ...prev,
+          rewards: prev.rewards.filter(r => r.id !== id),
+          savingGoalId: prev.savingGoalId === id ? undefined : prev.savingGoalId,
+        })),
+
+      redeemReward: id => {
+        const reward = stateRef.current.rewards.find(r => r.id === id);
+        if (!reward || stateRef.current.credits < reward.cost) return null;
+        return apply(prev => ({
+          ...prev,
+          credits: prev.credits - reward.cost,
+          rewards: reward.oneTime ? prev.rewards.filter(r => r.id !== id) : prev.rewards,
+          savingGoalId: reward.oneTime && prev.savingGoalId === id ? undefined : prev.savingGoalId,
+          events: trimEvents([event('PURCHASE', reward.name, { credits: -reward.cost }), ...prev.events]),
+        }));
+      },
+
+      setSavingGoal: id => apply(prev => ({ ...prev, savingGoalId: id })),
+
+      claimDailyBonus: () => {
+        const today = dayKey();
+        if (stateRef.current.lastBonusDay === today) return false;
+        apply(prev => ({
+          ...prev,
+          credits: prev.credits + DAILY_BONUS,
+          lastBonusDay: today,
+          events: trimEvents([event('BONUS', 'Bonificación diaria', { credits: DAILY_BONUS }), ...prev.events]),
+        }));
+        return true;
+      },
+
+      repairStreak: () => {
+        const s = stateRef.current;
+        const day = repairableDay({ activeDays: s.activeDays, repairedDays: s.repairedDays, restDays: s.settings.restDays });
+        if (!day || s.credits < STREAK_REPAIR_COST) return false;
+        apply(prev => ({
+          ...prev,
+          credits: prev.credits - STREAK_REPAIR_COST,
+          repairedDays: [...prev.repairedDays, day],
+          events: trimEvents([event('STREAK_REPAIR', 'Racha recuperada', { credits: -STREAK_REPAIR_COST }), ...prev.events]),
+        }));
+        return true;
+      },
+
+      clearStrike: () => {
+        const s = stateRef.current;
+        if (s.strikes === 0 || s.credits < CLEAR_STRIKE_COST) return false;
+        apply(prev => ({
+          ...prev,
+          credits: prev.credits - CLEAR_STRIKE_COST,
+          strikes: prev.strikes - 1,
+          events: trimEvents([event('PURCHASE', 'Limpiar una estrella', { credits: -CLEAR_STRIKE_COST }), ...prev.events]),
+        }));
+        return true;
+      },
+
+      updateSettings: patch =>
+        apply(prev => ({
+          ...prev,
+          settings: { ...prev.settings, ...patch },
+          strikes: patch.mode && patch.mode !== 'DEMANDING' ? 0 : prev.strikes,
+        })),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apply]);
+
+  const value = useMemo(() => ({ state, ...actions }), [state, actions]);
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useStore() {

@@ -1,428 +1,392 @@
-import { MapPin, Clock, Trash2, Plus, X, Check } from 'lucide-react';
-import { soundManager } from '../utils/audio';
+import { useMemo, useState } from 'react';
+import { Check, Flag, Lock, MoreHorizontal, Play, Plus, Radar, Search, Trash2 } from 'lucide-react';
+import { Campaign, Difficulty, Mission } from '../types';
 import { useStore } from '../context/StoreContext';
-import React, { useRef, useState } from 'react';
-import { getRankData } from '../utils/leveling';
+import { useUI } from '../context/UIContext';
+import { useMissionActions } from '../hooks/useMissionActions';
+import { useNow } from '../hooks/useNow';
+import { campaignProgress, isDoneForPeriod, isLocked, suggestRewards } from '../lib/missions';
+import { dayKey, formatMinutes } from '../lib/time';
+import { MissionCard } from '../components/MissionCard';
+import { ActionSheet, Sheet } from '../components/Sheet';
+import { ScannerSheet } from './ScannerSheet';
+import { soundManager } from '../utils/audio';
+
+type StatusFilter = 'PENDING' | 'DONE' | 'ARCHIVED';
+type DurationFilter = 'ALL' | 'SHORT' | 'MEDIUM' | 'LONG';
+
+const DURATION_FILTERS: { value: DurationFilter; label: string; test: (min: number) => boolean }[] = [
+  { value: 'ALL', label: 'Cualquier duración', test: () => true },
+  { value: 'SHORT', label: 'Hasta 15 min', test: m => m <= 15 },
+  { value: 'MEDIUM', label: '16–45 min', test: m => m > 15 && m <= 45 },
+  { value: 'LONG', label: 'Más de 45 min', test: m => m > 45 },
+];
+
+const statusOrder = (m: Mission, now: number) => {
+  if (m.status === 'ACTIVE') return 0;
+  if (m.status === 'VERIFY') return 1;
+  if (m.status === 'PAUSED') return 2;
+  if (isDoneForPeriod(m, now)) return 5;
+  return 3;
+};
 
 export function MissionsView() {
-  const { state, updateState, updateMission, addMission, removeMission, completeMission, failMission } = useStore();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    difficulty: 'NORMAL',
-    location: '',
-    durationMinutes: 30,
-    rewardCash: 1000,
-    rewardRespect: 100,
-    category: 'TRABAJO'
-  });
+  const { state } = useStore();
+  const { editMission } = useUI();
+  const hasRunning = state.missions.some(m => m.status === 'ACTIVE');
+  const now = useNow(true, hasRunning ? 1000 : 30_000);
+  const [view, setView] = useState<'LIST' | 'CAMPAIGNS'>('LIST');
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('PENDING');
+  const [category, setCategory] = useState('');
+  const [duration, setDuration] = useState<DurationFilter>('ALL');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [campaignFormOpen, setCampaignFormOpen] = useState(false);
 
-  const toggleMission = (id: string, status: string) => {
-    soundManager.playClick();
-    if (status === 'IDLE') {
-      updateMission(id, { status: 'ACTIVE' });
-    } else if (status === 'ACTIVE') {
-      updateMission(id, { status: 'IDLE' });
-    }
-  };
+  const campaignNames = useMemo(() => new Map(state.campaigns.map(c => [c.id, c.name])), [state.campaigns]);
+  const categories = useMemo(
+    () => [...new Set([...state.districts.map(d => d.name), ...state.missions.map(m => m.category).filter(Boolean)])],
+    [state.districts, state.missions],
+  );
 
-  const deleteMission = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    soundManager.playError();
-    removeMission(id);
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const durationTest = DURATION_FILTERS.find(d => d.value === duration)!.test;
+    const today = dayKey(now);
+    return state.missions
+      .filter(m => {
+        if (status === 'ARCHIVED') return !!m.archived;
+        if (m.archived) return false;
+        const resolved = m.status === 'PASSED' || m.status === 'FAILED';
+        if (status === 'DONE') return resolved;
+        // Later campaign steps live in the Campañas view until they unlock.
+        return !resolved && !isLocked(m, state.missions);
+      })
+      .filter(m => !category || m.category.toLowerCase() === category.toLowerCase())
+      .filter(m => durationTest(m.durationSeconds / 60))
+      .filter(m => !q || m.name.toLowerCase().includes(q) || m.location.toLowerCase().includes(q) || m.category.toLowerCase().includes(q))
+      .sort((a, b) => {
+        if (status === 'DONE') return (b.finishedAt ?? 0) - (a.finishedAt ?? 0);
+        const order = statusOrder(a, now) - statusOrder(b, now);
+        if (order) return order;
+        if (!!a.featured !== !!b.featured) return a.featured ? -1 : 1;
+        const aDue = a.dueDate ?? '9999';
+        const bDue = b.dueDate ?? '9999';
+        if (aDue !== bDue) return aDue < bDue ? -1 : 1;
+        if (aDue <= today) return 0;
+        return b.createdAt - a.createdAt;
+      });
+  }, [state.missions, status, category, duration, query, now]);
 
-  const handleManualSubmit = () => {
-    if (!formData.name.trim() || !formData.location.trim() || !formData.category.trim()) {
-      soundManager.playError();
-      return;
-    }
-    soundManager.playAccept();
-    addMission({
-      id: Date.now().toString(),
-      name: formData.name.trim().toUpperCase(),
-      difficulty: formData.difficulty.toUpperCase() as any,
-      location: formData.location.trim().toUpperCase(),
-      durationSeconds: formData.durationMinutes * 60,
-      rewardCash: formData.rewardCash,
-      rewardRespect: formData.rewardRespect,
-      status: 'IDLE',
-      timeRemaining: formData.durationMinutes * 60,
-      category: formData.category.trim().toUpperCase()
-    });
-    setShowAddForm(false);
-    setFormData({ name: '', difficulty: 'NORMAL', location: '', durationMinutes: 30, rewardCash: 1000, rewardRespect: 100, category: 'TRABAJO' });
-  };
+  const counts = useMemo(
+    () => ({
+      PENDING: state.missions.filter(m => !m.archived && m.status !== 'PASSED' && m.status !== 'FAILED' && !isLocked(m, state.missions)).length,
+      DONE: state.missions.filter(m => !m.archived && (m.status === 'PASSED' || m.status === 'FAILED')).length,
+      ARCHIVED: state.missions.filter(m => m.archived).length,
+    }),
+    [state.missions],
+  );
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const getDiffColor = (diff: string) => {
-    if (diff === 'EASY') return 'bg-secondary-container text-on-secondary-container';
-    if (diff === 'HARD') return 'bg-error text-white';
-    return 'bg-tertiary text-black';
-  };
-
-  const downloadTemplateArea = () => {
-    soundManager.playHover();
-    const headers = "NOMBRE,DIFICULTAD,UBICACION,DURACION_MINUTOS,RECOMPENSA_CASH,RECOMPENSA_RESPETO,CATEGORIA\n";
-    const example = "NUEVO OBJETIVO,NORMAL,CENTRO CIUDAD,30,1500,200,TRABAJO\nATRACO NOCTURNO,HARD,BANCO,60,5000,1000,DINERO\n";
-    const currentMissions = state.missions.map(m => 
-      `${m.name},${m.difficulty},${m.location},${Math.floor(m.durationSeconds / 60)},${m.rewardCash},${m.rewardRespect},${m.category}`
-    ).join('\n');
-    
-    // We will now include the example at the top of the file so users see the format clearly
-    // but we can just use current missions if they exist, else show example
-    const csvContent = headers + (currentMissions ? (currentMissions + '\n' + example) : example);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const dt = new Date().toISOString().split('T')[0];
-    link.setAttribute("download", `plantilla_misiones_${dt}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleImportClick = () => {
-    soundManager.playClick();
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-        
-        let newMissions = [];
-        let newCategories = new Set<string>();
-
-        // Skip header line (index 0)
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(';').map(c => c.trim()); // Sometimes it's semicolon separated in ES, but we will try split by comma if semicolon isn't there
-          let actualCols = cols;
-          if (cols.length < 7) {
-            actualCols = lines[i].split(',').map(c => c.trim());
-          }
-
-          if (actualCols.length >= 7) {
-             const category = actualCols[6].toUpperCase();
-            newMissions.push({
-              id: Date.now().toString() + i,
-              name: actualCols[0].toUpperCase(),
-              difficulty: actualCols[1].toUpperCase() as any,
-              location: actualCols[2].toUpperCase(),
-              durationSeconds: parseInt(actualCols[3]) * 60,
-              rewardCash: parseInt(actualCols[4]),
-              rewardRespect: parseInt(actualCols[5]),
-              status: 'IDLE',
-              timeRemaining: parseInt(actualCols[3]) * 60,
-              category
-            });
-            newCategories.add(category);
-          }
-        }
-        if (newMissions.length > 0) {
-           const existingCategories = new Set(state.categories.map(c => c.name));
-           const categoriesToAdd = Array.from(newCategories).filter(c => !existingCategories.has(c));
-           
-        let nextState = { ...state, missions: [...newMissions, ...state.missions] };
-           if (categoriesToAdd.length > 0) {
-             // We can just add categories to the state manually to avoid calling multiple actions sequentially
-             const nextCats = [...state.categories];
-             categoriesToAdd.forEach(cat => {
-                nextCats.push({
-                  id: Date.now().toString() + Math.random(),
-                  name: cat,
-                  percentage: nextCats.length > 0 ? nextCats[0].percentage : 25,
-                  label: cat.substring(0, 3)
-                });
-             });
-             nextState.categories = nextCats;
-           }
-
-           updateState(nextState);
-           soundManager.playJackpot();
-           alert(`SE IMPORTARON ${newMissions.length} MISIONES CON ÉXITO`);
-        } else {
-           throw new Error("No valid rows");
-        }
-      } catch (error) {
-        soundManager.playError();
-        alert('ARCHIVO CSV DAÑADO O FORMATO INVÁLIDO.');
-      }
-    };
-    reader.readAsText(file); // Default UTF-8
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const { rank, percentage } = getRankData(state.respect);
-  const blocks = Math.floor(percentage / 10);
+  const filtersActive = !!query || !!category || duration !== 'ALL';
 
   return (
-    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-xl font-bold uppercase text-on-surface">OBJETIVOS ACTUALES</h2>
-        <div className="flex flex-wrap gap-2">
-          <button 
-            className="bg-surface-variant px-3 py-1 border-2 border-on-surface text-xs font-bold hover:bg-on-surface hover:text-surface transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={downloadTemplateArea}
-          >
-            PLANTILLA CSV
+    <div className="page flex flex-col gap-5">
+      <section className="flex flex-wrap items-end justify-between gap-3">
+        <h1 className="title-display text-5xl sm:text-6xl text-cream">Misiones</h1>
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={() => setScannerOpen(true)}>
+            <Radar size={18} /> Escáner
           </button>
-          <button 
-            className="bg-primary text-on-primary px-3 py-1 border-2 border-black text-xs font-bold hover:brightness-110 transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={handleImportClick}
-          >
-            IMPORTAR CSV
+          <button className="btn btn-primary" onClick={() => (view === 'LIST' ? editMission(null) : setCampaignFormOpen(true))}>
+            <Plus size={18} /> {view === 'LIST' ? 'Nueva' : 'Campaña'}
           </button>
-          <button 
-            className="bg-secondary text-on-secondary px-3 py-1 border-2 border-black text-xs font-bold hover:brightness-110 transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={() => {
-               soundManager.playClick();
-               setShowAddForm(!showAddForm);
-            }}
-          >
-            {showAddForm ? <X size={14} /> : <Plus size={14} />} 
-            MANUAL
-          </button>
-          <input 
-            type="file" 
-            accept=".csv" 
-            className="hidden" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-          />
         </div>
+      </section>
+
+      <div className="segmented">
+        <button aria-pressed={view === 'LIST'} onClick={() => setView('LIST')}>
+          Lista
+        </button>
+        <button aria-pressed={view === 'CAMPAIGNS'} onClick={() => setView('CAMPAIGNS')}>
+          Campañas {state.campaigns.length > 0 && <span className="text-muted">· {state.campaigns.length}</span>}
+        </button>
       </div>
 
-      {showAddForm && (
-        <div className="bg-surface border-4 border-secondary p-4 mb-6 hard-shadow animate-in slide-in-from-top-4 duration-300">
-          <h3 className="text-xl font-bold text-secondary uppercase mb-4">DATOS NUEVO OBJETIVO</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1 sm:col-span-2">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DESIGNACIÓN</label>
-              <input 
-                type="text"
-                value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">CATEGORÍA</label>
-              <input 
-                type="text"
-                value={formData.category}
-                onChange={e => setFormData({ ...formData, category: e.target.value })}
-                placeholder="EJ. TRABAJO, SALUD..."
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">UBICACIÓN</label>
-              <input 
-                type="text"
-                value={formData.location}
-                onChange={e => setFormData({ ...formData, location: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DIFICULTAD</label>
-              <select 
-                value={formData.difficulty}
-                onChange={e => setFormData({ ...formData, difficulty: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              >
-                <option value="EASY">FÁCIL</option>
-                <option value="NORMAL">NORMAL</option>
-                <option value="HARD">DIFÍCIL</option>
+      {view === 'LIST' ? (
+        <>
+          <section className="flex flex-col gap-3">
+            <label className="relative block">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+              <input className="input pl-10" type="search" placeholder="Buscar por nombre, lugar o distrito" value={query} onChange={e => setQuery(e.target.value)} />
+            </label>
+            <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
+              {(
+                [
+                  ['PENDING', 'Pendientes'],
+                  ['DONE', 'Completadas'],
+                  ['ARCHIVED', 'Archivadas'],
+                ] as [StatusFilter, string][]
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`chip min-h-9 px-3 shrink-0 ${status === value ? 'bg-cream text-bg-deep' : 'hover:bg-surface-3'}`}
+                  aria-pressed={status === value}
+                  onClick={() => setStatus(value)}
+                >
+                  {label} <span className="counter opacity-70">{counts[value]}</span>
+                </button>
+              ))}
+              <select className="input !min-h-9 !w-auto !rounded-full !py-0 text-sm shrink-0" value={category} onChange={e => setCategory(e.target.value)} aria-label="Distrito">
+                <option value="">Todos los distritos</option>
+                {categories.map(c => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <select className="input !min-h-9 !w-auto !rounded-full !py-0 text-sm shrink-0" value={duration} onChange={e => setDuration(e.target.value as DurationFilter)} aria-label="Duración">
+                {DURATION_FILTERS.map(d => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DURACIÓN (MIN)</label>
-              <input 
-                type="number"
-                min="1"
-                value={formData.durationMinutes}
-                onChange={e => setFormData({ ...formData, durationMinutes: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">RECOMPENSA (DINERO)</label>
-              <input 
-                type="number"
-                min="0"
-                value={formData.rewardCash}
-                onChange={e => setFormData({ ...formData, rewardCash: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">RECOMPENSA (RESPETO)</label>
-              <input 
-                type="number"
-                min="0"
-                value={formData.rewardRespect}
-                onChange={e => setFormData({ ...formData, rewardRespect: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
-            </div>
-          </div>
-          <button 
-             onClick={handleManualSubmit}
-             className="w-full mt-4 bg-secondary text-on-secondary font-black tracking-widest uppercase p-4 border-2 border-black hard-shadow active:translate-x-1 active:translate-y-1 active:shadow-none transition-all hover:brightness-110 rounded-none"
-          >
-            INICIALIZAR OBJETIVO
-          </button>
-        </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            {filtered.map(m => (
+              <MissionCard key={m.id} mission={m} now={now} campaignName={m.campaignId ? campaignNames.get(m.campaignId) : undefined} />
+            ))}
+            {filtered.length === 0 && (
+              <div className="card p-8 text-center">
+                <p className="font-semibold text-cream">
+                  {filtersActive ? 'Nada coincide con estos filtros' : status === 'PENDING' ? 'No tienes misiones pendientes' : status === 'DONE' ? 'Todavía no has completado misiones' : 'El archivo está vacío'}
+                </p>
+                {filtersActive ? (
+                  <button
+                    className="btn btn-secondary mt-4"
+                    onClick={() => {
+                      setQuery('');
+                      setCategory('');
+                      setDuration('ALL');
+                    }}
+                  >
+                    Quitar filtros
+                  </button>
+                ) : (
+                  status === 'PENDING' && (
+                    <button className="btn btn-primary mt-4" onClick={() => editMission(null)}>
+                      <Plus size={18} /> Nueva misión
+                    </button>
+                  )
+                )}
+              </div>
+            )}
+          </section>
+        </>
+      ) : (
+        <CampaignList onCreate={() => setCampaignFormOpen(true)} />
       )}
 
-      <div className="mb-10">
-        <div className="flex justify-between mb-2">
-          <span className="text-xs font-bold text-tertiary uppercase italic">RANGO: {rank}</span>
-          <span className="text-xs font-bold text-tertiary">{percentage}%</span>
+      <ScannerSheet open={scannerOpen} onClose={() => setScannerOpen(false)} />
+      <CampaignForm open={campaignFormOpen} onClose={() => setCampaignFormOpen(false)} />
+    </div>
+  );
+}
+
+function CampaignList({ onCreate }: { onCreate: () => void }) {
+  const { state } = useStore();
+  const sorted = [...state.campaigns].sort((a, b) => (a.completedAt ? 1 : 0) - (b.completedAt ? 1 : 0) || b.createdAt - a.createdAt);
+
+  if (state.campaigns.length === 0) {
+    return (
+      <div className="card p-6 text-center flex flex-col items-center gap-3">
+        <Flag size={28} className="text-coral" />
+        <p className="font-semibold text-cream">Divide un gran objetivo en pasos</p>
+        <p className="text-sm text-cream-dim max-w-md">
+          Por ejemplo, «Terminar mi aplicación»: diseño, desarrollo, pruebas y publicación. Cada paso desbloquea el siguiente y completar la campaña da una bonificación.
+        </p>
+        <button className="btn btn-primary mt-1" onClick={onCreate}>
+          <Plus size={18} /> Crear campaña
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      {sorted.map(c => (
+        <CampaignCard key={c.id} campaign={c} />
+      ))}
+    </section>
+  );
+}
+
+function CampaignCard({ campaign }: { campaign: Campaign }) {
+  const { state, removeCampaign } = useStore();
+  const { toast, setTab } = useUI();
+  const actions = useMissionActions();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { steps, done, total, next } = campaignProgress(campaign, state.missions);
+
+  return (
+    <article className="card p-4 sm:p-5">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-teal">{campaign.category}</p>
+          <h3 className="title-display text-2xl text-cream mt-0.5 break-words">{campaign.name}</h3>
+          <p className="text-sm text-cream-dim mt-1">
+            <span className="counter text-cream">{done}</span> de <span className="counter text-cream">{total}</span> pasos completados
+            {campaign.completedAt && <span className="text-teal"> · Campaña completada</span>}
+          </p>
         </div>
-        <div className="h-6 w-full bg-surface-container border-2 border-primary flex p-0.5 gap-1">
-            {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className={`h-full w-[10%] ${i < blocks ? 'bg-tertiary' : 'bg-surface-container-high'}`} />
-            ))}
-        </div>
+        <button className="btn btn-ghost btn-icon btn-sm -mr-2 -mt-1" onClick={() => setMenuOpen(true)} aria-label={`Acciones de ${campaign.name}`}>
+          <MoreHorizontal size={20} />
+        </button>
+      </div>
+      <div className="progress mt-3">
+        <div style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
       </div>
 
-      <div className="space-y-6">
-        {state.missions.length === 0 && (
-           <div className="p-8 text-center border-2 border-dashed border-on-surface-variant/50 text-on-surface-variant uppercase font-bold text-sm">
-             SIN MISIONES ACTIVAS
-           </div>
-        )}
-        {[...state.missions].sort((a, b) => {
-          if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
-          if (b.status === 'ACTIVE' && a.status !== 'ACTIVE') return 1;
-          if (a.status === 'VERIFY' && b.status !== 'VERIFY') return -1;
-          if (b.status === 'VERIFY' && a.status !== 'VERIFY') return 1;
-          return 0;
-        }).map(mission => {
-           const isActive = mission.status === 'ACTIVE';
-           const isPassed = mission.status === 'PASSED';
-           const isVerify = mission.status === 'VERIFY';
-           const progressPercent = mission.timeRemaining ? ((mission.durationSeconds - mission.timeRemaining) / mission.durationSeconds) * 100 : 100;
-           
-           return (
-            <div 
-              key={mission.id}
-              onClick={() => !isPassed && toggleMission(mission.id, mission.status)}
-              className={`
-                bg-surface border-2 p-4 cursor-pointer transition-all active:translate-x-1 active:translate-y-1 group relative
-                ${isActive ? 'border-primary ring-2 ring-primary shadow-[0_0_20px_rgba(var(--color-primary),0.3)] translate-x-1 translate-y-1' : 'border-primary-container hard-shadow'}
-                ${isPassed ? 'opacity-50 pointer-events-none' : ''}
-                ${isVerify ? 'border-tertiary shadow-[0_0_15px_rgba(var(--color-tertiary),0.6)]' : ''}
-              `}
-            >
-              {isActive && (
-                <div className="absolute -top-3 -left-3 bg-primary text-background font-black uppercase text-[10px] px-2 py-1 rotate-[-5deg] z-20 border-2 border-background">
-                  EN CURSO
-                </div>
-              )}
-              <button 
-                onClick={(e) => deleteMission(mission.id, e)}
-                className="absolute top-2 right-2 text-error opacity-0 group-hover:opacity-100 hover:scale-110 transition-all bg-surface p-1 rounded-none border border-error z-10"
+      <ol className="mt-4 flex flex-col gap-1">
+        {steps.map(step => {
+          const isNext = step.id === next?.id;
+          const passed = step.status === 'PASSED';
+          return (
+            <li key={step.id} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${isNext ? 'bg-surface-2' : ''}`}>
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${passed ? 'bg-teal text-bg-deep' : isNext ? 'bg-coral text-bg-deep' : 'bg-bg-deep text-muted'}`}
               >
-                 <Trash2 size={16} />
-              </button>
-
-              <div className="flex justify-between items-start mb-2 pr-8">
-                <div>
-                  <h3 className="text-xl font-bold text-primary-container uppercase">{mission.name}</h3>
-                  <p className="text-[10px] text-tertiary uppercase font-black">{mission.category}</p>
-                </div>
-                <span className={`px-2 py-0.5 text-[10px] font-bold uppercase ${getDiffColor(mission.difficulty)}`}>
-                  DIFICULTAD: {mission.difficulty}
-                </span>
-              </div>
-              
-              <div className="flex items-center gap-2 text-on-surface-variant mb-6 text-sm">
-                <MapPin size={16} />
-                <span className="font-bold uppercase">{mission.location}</span>
-                <span className="mx-2 text-outline">|</span>
-                <Clock size={16} />
-                <span className={`font-bold uppercase tabular-nums ${isActive ? 'text-primary' : ''} ${isVerify ? 'text-error animate-pulse' : ''}`}>
-                  {formatTime(mission.timeRemaining || 0)}
-                </span>
-              </div>
-
-              <div className="h-1.5 w-full bg-surface-container-highest mb-4 overflow-hidden">
-                <div 
-                  className={`h-full transition-all duration-1000 ${isActive ? 'bg-primary' : isPassed || isVerify ? 'bg-tertiary' : 'bg-primary-container'}`} 
-                  style={{ width: `${isPassed || isVerify ? 100 : progressPercent}%` }} 
-                />
-              </div>
-
-              {isActive && (
+                {passed ? <Check size={14} /> : isNext ? (step.campaignStep ?? 0) + 1 : <Lock size={12} />}
+              </span>
+              <span className={`flex-1 min-w-0 truncate ${passed ? 'text-muted line-through' : isNext ? 'text-cream font-medium' : 'text-muted'}`}>{step.name}</span>
+              <span className="text-xs text-muted shrink-0">{formatMinutes(step.durationSeconds / 60)}</span>
+              {isNext && step.status !== 'ACTIVE' && step.status !== 'VERIFY' && (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    soundManager.playJackpot();
-                    completeMission(mission.id);
+                  className="btn btn-primary btn-icon btn-sm shrink-0"
+                  aria-label={`Empezar ${step.name}`}
+                  onClick={() => {
+                    actions.start(step);
+                    setTab('TODAY');
                   }}
-                  className="w-full mb-4 bg-primary text-background font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
                 >
-                  <Check size={20} />
-                  COMPLETAR AHORA
+                  <Play size={16} />
                 </button>
               )}
-
-              {isVerify && (
-                <div className="flex flex-col gap-2 mb-4">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      soundManager.playJackpot();
-                      completeMission(mission.id);
-                    }}
-                    className="w-full bg-tertiary text-on-tertiary font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
-                  >
-                    <Check size={20} />
-                    VERIFICAR Y COMPLETAR
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      soundManager.playError();
-                      failMission(mission.id);
-                    }}
-                    className="w-full bg-error text-white font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
-                  >
-                    <X size={20} />
-                    FALLIDA (-1 ESTRELLA)
-                  </button>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-primary uppercase">
-                  RECOMPENSA: ${mission.rewardCash} + {mission.rewardRespect} RESPETO
-                </span>
-                {isActive && <div className="text-tertiary font-bold animate-pulse text-sm">MISIÓN ACTIVA...</div>}
-                {isVerify && <div className="text-tertiary font-bold animate-pulse text-sm">PENDIENTE...</div>}
-                {isPassed && <div className="text-tertiary font-bold text-sm uppercase">MISIÓN COMPLETADA</div>}
-              </div>
-            </div>
+              {isNext && (step.status === 'ACTIVE' || step.status === 'VERIFY') && <span className="chip text-coral shrink-0">En curso</span>}
+            </li>
           );
         })}
+      </ol>
+
+      <ActionSheet
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        title={campaign.name}
+        actions={[
+          {
+            label: 'Eliminar campaña',
+            icon: Trash2,
+            danger: true,
+            onSelect: () => {
+              const snapshot = removeCampaign(campaign.id);
+              toast('Campaña eliminada (los pasos completados siguen en tu historial)', snapshot);
+            },
+          },
+        ]}
+      />
+    </article>
+  );
+}
+
+function CampaignForm({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { state, addCampaign } = useStore();
+  const { toast } = useUI();
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [stepsText, setStepsText] = useState('');
+  const [minutes, setMinutes] = useState(45);
+  const [difficulty, setDifficulty] = useState<Difficulty>('NORMAL');
+  const [error, setError] = useState('');
+
+  const steps = stepsText
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const rewards = suggestRewards(minutes || 1, difficulty);
+
+  const submit = () => {
+    if (!name.trim()) return setError('Ponle nombre a la campaña.');
+    if (steps.length < 2) return setError('Escribe al menos dos pasos, uno por línea.');
+    soundManager.playAccept();
+    addCampaign({ name, category: category.trim() || 'General', steps, minutes: Math.max(1, minutes), difficulty, ...rewards });
+    toast(`Campaña creada con ${steps.length} pasos`);
+    setName('');
+    setStepsText('');
+    setError('');
+    onClose();
+  };
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Nueva campaña"
+      footer={
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn btn-primary flex-1" onClick={submit}>
+            Crear campaña
+          </button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <label className="field">
+          <span>Objetivo</span>
+          <input className="input" value={name} placeholder="Terminar mi aplicación" onChange={e => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Distrito</span>
+          <input className="input" list="campaign-districts" value={category} placeholder="Trabajo" onChange={e => setCategory(e.target.value)} />
+          <datalist id="campaign-districts">
+            {state.districts.map(d => (
+              <option key={d.id} value={d.name} />
+            ))}
+          </datalist>
+        </label>
+        <label className="field">
+          <span>Pasos (uno por línea, en orden)</span>
+          <textarea className="input" rows={5} value={stepsText} placeholder={'Diseño\nDesarrollo\nPruebas\nPublicación'} onChange={e => setStepsText(e.target.value)} />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="field">
+            <span>Minutos por paso</span>
+            <input type="number" min={1} inputMode="numeric" className="input" value={minutes || ''} onChange={e => setMinutes(parseInt(e.target.value, 10) || 0)} />
+          </label>
+          <label className="field">
+            <span>Dificultad</span>
+            <select className="input" value={difficulty} onChange={e => setDifficulty(e.target.value as Difficulty)}>
+              <option value="EASY">Fácil</option>
+              <option value="NORMAL">Normal</option>
+              <option value="HARD">Difícil</option>
+            </select>
+          </label>
+        </div>
+        <p className="text-sm text-muted">
+          Cada paso: <span className="counter text-sun">${rewards.rewardCash.toLocaleString('es-ES')}</span> y <span className="counter text-pink">{rewards.rewardRespect}</span> de respeto.
+          {steps.length >= 2 && (
+            <>
+              {' '}
+              Bonificación al terminar: <span className="counter text-sun">${(1000 + steps.length * 500).toLocaleString('es-ES')}</span>.
+            </>
+          )}
+        </p>
+        {error && <p className="text-sm text-danger font-medium" role="alert">{error}</p>}
       </div>
-    </div>
+    </Sheet>
   );
 }

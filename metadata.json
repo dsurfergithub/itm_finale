@@ -1,6 +1,6 @@
 {
   "name": "Into The Mission",
-  "description": "A retro, brutalist style gamified task manager.",
+  "description": "Convierte tus objetivos en misiones con tiempo y recompensa, y construye tu ciudad costera.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

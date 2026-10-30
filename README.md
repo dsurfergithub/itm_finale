@@ -1,53 +1,38 @@
 # Into The Mission
 
-Into The Mission es una app gamificada para transformar objetivos personales en misiones con tiempo, recompensas, progreso, rachas y un mercado de recompensas.
+Into The Mission convierte tus objetivos personales en misiones con tiempo y recompensa. Cada misión completada construye un distrito de tu ciudad costera ilustrada, y los créditos se canjean por recompensas reales que tú eliges.
 
-Esta iteración propone una dirección visual de ciudad costera nocturna, neón, HUD de misión, mapas de distrito y estética arcade, sin usar logos, nombres, música, personajes ni recursos protegidos de franquicias existentes.
+La identidad visual es original: una ciudad costera al atardecer (berenjena oscuro, crema, coral, rosa y turquesa), títulos condensados y escenas ilustradas en SVG. No usa logos, nombres, música, personajes ni recursos de franquicias existentes.
 
-## Funcionalidades actuales
+## Pantallas
 
-- Gestión de misiones con dificultad, ubicación, duración, recompensa en créditos y respeto.
-- Activación, verificación, finalización y fallo de misiones.
-- Ruleta/escáner para seleccionar misiones aleatorias.
-- Progreso por categorías.
-- Sistema de respeto, créditos y estrellas de penalización.
-- Tienda de recompensas y bonus diario.
-- Registro de actividad.
-- Backup y restauración local.
-- Importación CSV de misiones.
+- **Hoy**: misión en curso con temporizador, misión principal, dos o tres tareas secundarias, siguiente desbloqueo, ahorro para una recompensa, bonificación diaria y recuperación de racha.
+- **Misiones**: búsqueda y filtros (estado, distrito, duración), menú de acciones táctil (editar, duplicar, reprogramar, principal, archivar, eliminar), deshacer, escáner por tiempo, energía y lugar, y campañas con pasos que se desbloquean en orden.
+- **Ciudad**: panorámica de la costa; cada distrito crece con las misiones completadas y tiene un objetivo semanal («3 de 5 sesiones esta semana»). Cada rango añade un elemento nuevo a la ciudad.
+- **Mercado**: recompensas reutilizables o de un solo uso, objetivo de ahorro e historial de canjes.
+- **Perfil**: rango, rachas, actividad semanal, historial filtrable y ajustes (modo de juego, días de descanso, sonido, copias de seguridad, importación CSV con vista previa, demostración y reinicio).
+
+## Reglas
+
+- La racha cuenta **días** con al menos una misión completada; los días de descanso no la rompen.
+- El temporizador guarda el inicio y el tiempo acumulado, así que sigue contando con la app cerrada.
+- Eliminar o reorganizar misiones nunca penaliza. Los modos Relajado, Estándar y Exigente definen qué pasa al no lograr una misión.
+- Los datos se guardan en el dispositivo (`localStorage`). El progreso de la versión anterior se migra automáticamente y se guarda una copia del original en `itm_state_v1_backup`.
 
 ## Ejecutar en local
 
-**Requisitos:** Node.js 20 o superior recomendado.
+**Requisitos:** Node.js 20 o superior.
 
 ```bash
 npm install
-npm run dev
+npm run dev      # servidor de desarrollo
+npm run lint     # comprobación de tipos
+npm test         # pruebas de racha, temporizador, migración y CSV
+npm run build    # build de producción (incluye service worker para uso sin conexión)
 ```
 
-Para comprobar tipos:
+## Formato CSV
 
-```bash
-npm run lint
-```
+`NOMBRE, DIFICULTAD, UBICACION, DURACION_MINUTOS, RECOMPENSA_CASH, RECOMPENSA_RESPETO, CATEGORIA, RECURRENCIA`
 
-Para generar build de producción:
-
-```bash
-npm run build
-```
-
-## Variables de entorno
-
-El proyecto incluye dependencias preparadas para futuras funciones con IA. Si se añade generación de misiones con Gemini, configura `GEMINI_API_KEY` en `.env.local`.
-
-## Dirección de producto
-
-Próximas mejoras sugeridas:
-
-1. Vista de mapa con distritos por categoría.
-2. Generador de misiones con IA a partir de objetivos reales.
-3. Cadenas de misiones y mini-campañas.
-4. Sistema de penalización más dinámico.
-5. Feed de eventos tipo archivo, rumor o noticia interna.
-6. Modo PWA/offline y sonidos originales adicionales.
+Se aceptan comas o punto y coma y campos entre comillas. Si faltan las recompensas se calculan automáticamente. `RECURRENCIA` puede ser `DIARIA`, `SEMANAL` o vacía.
