@@ -1,412 +1,315 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { AppState, Mission, LogEntry, Category, Reward } from '../types';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import type {
+  AppState,
+  Mission,
+  LogEntry,
+  Reward,
+  Settings,
+  PenaltyRule,
+} from "../types";
+import {
+  initialState,
+  migrate,
+  reconcile,
+  uid,
+  finishMission,
+  applyPenalty,
+  newLog,
+  dayKey,
+} from "../utils/game";
+import { soundManager } from "../utils/audio";
 
-interface StoreContextType {
+function loadState(): AppState {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem("itm_state");
+    if (raw) {
+      const data = JSON.parse(raw);
+      const migrated = migrate(data);
+      if (
+        !migrated.lastBonusDate &&
+        localStorage.getItem("itm_last_bonus_date") ===
+          new Date().toLocaleDateString()
+      )
+        migrated.lastBonusDate = dayKey();
+      try {
+        if (data.version !== 2 && !localStorage.getItem("itm_pre_v2_backup"))
+          localStorage.setItem("itm_pre_v2_backup", raw);
+      } catch {
+        /* A full quota must not discard a valid save. */
+      }
+      return migrated;
+    }
+  } catch {
+    if (raw)
+      try {
+        localStorage.setItem("itm_recovery_backup", raw);
+      } catch {}
+  }
+  return initialState();
+}
+interface Store {
   state: AppState;
-  updateState: (newState: Partial<AppState>) => void;
+  storageError: string;
+  updateState: (s: Partial<AppState>) => void;
   resetAll: () => void;
-  addMission: (mission: Mission) => void;
-  updateMission: (id: string, updates: Partial<Mission>) => void;
+  addMission: (m: Mission) => void;
+  updateMission: (id: string, m: Partial<Mission>) => void;
+  startMission: (id: string) => void;
+  pauseMission: (id: string) => void;
+  removeMission: (id: string) => void;
   completeMission: (id: string) => void;
   failMission: (id: string) => void;
-  addLog: (log: LogEntry) => void;
+  addLog: (l: LogEntry) => void;
   addCategory: (name: string) => void;
   removeCategory: (id: string) => void;
-  removeMission: (id: string) => void;
   punish: () => void;
-  addReward: (reward: Reward) => void;
+  addReward: (r: Reward) => void;
   buyReward: (id: string) => void;
+  claimBonus: () => void;
+  buySoborno: () => void;
+  setSettings: (s: Partial<Settings>) => void;
+  saveRule: (r: PenaltyRule) => void;
+  deleteRule: (id: string) => void;
+  completeConsequence: (id: string) => void;
+  restore: (data: unknown) => void;
 }
-
-const defaultState: AppState = {
-  respect: 2450,
-  credits: 14500,
-  strikes: 0,
-  missions: [
-    {
-      id: '1',
-      name: 'LIMPIAR EL SECTOR',
-      difficulty: 'HARD',
-      location: 'OFICINA CENTRO',
-      durationSeconds: 45 * 60,
-      rewardCash: 5000,
-      rewardRespect: 500,
-      status: 'IDLE',
-      timeRemaining: 45 * 60,
-      category: 'TRABAJO'
-    },
-    {
-      id: '2',
-      name: 'RECUPERAR DATOS',
-      difficulty: 'EASY',
-      location: 'CIBERCAFÉ',
-      durationSeconds: 15 * 60,
-      rewardCash: 1200,
-      rewardRespect: 150,
-      status: 'IDLE',
-      timeRemaining: 15 * 60,
-      category: 'TRABAJO'
-    }
-  ],
-  rewards: [
-    { id: '1', name: 'DÍA LIBRE', cost: 100000 },
-    { id: '2', name: 'CENA ESPECIAL', cost: 15000 },
-    { id: '3', name: 'ESCAPADA DE FIN DE SEMANA', cost: 55000 }
-  ],
-  logs: [
-    { id: '1', name: 'MISIÓN DE NEÓN', timestamp: '2023.10.24 // 22:45', points: 5000, type: 'RESPECT', passed: true },
-    { id: '2', name: 'OBJETIVO POSPUESTO', timestamp: '2023.10.23 // 14:12', points: -1200, type: 'CREDITS', passed: false },
-    { id: '3', name: 'RECUPERACIÓN INTEL', timestamp: '2023.10.22 // 03:20', points: 2500, type: 'RESPECT', passed: true },
-  ],
-  categories: [
-    { id: '1', name: 'TRABAJO', percentage: 85, label: 'EL CAPO' },
-    { id: '2', name: 'SALUD', percentage: 60, label: 'ATLETA' },
-    { id: '3', name: 'OCIO', percentage: 30, label: 'NOVATO' }
-  ],
-  stats: {
-    streak: 12,
-    totalMissions: 142,
-    score: 1240500,
-    activity: [40, 60, 90, 30, 75, 100, 20]
-  }
-};
-
-const blankState: AppState = {
-  respect: 0,
-  credits: 0,
-  strikes: 0,
-  missions: [],
-  rewards: [],
-  logs: [],
-  categories: [],
-  stats: {
-    streak: 0,
-    totalMissions: 0,
-    score: 0,
-    activity: [0, 0, 0, 0, 0, 0, 0]
-  }
-};
-
-const StoreContext = createContext<StoreContextType | undefined>(undefined);
-
-function loadSavedState(): AppState {
-  if (typeof window === 'undefined') return defaultState;
-
-  const saved = localStorage.getItem('itm_state');
-  if (!saved) return defaultState;
-
-  try {
-    const parsed = JSON.parse(saved) as Partial<AppState>;
-    return {
-      ...defaultState,
-      ...parsed,
-      missions: Array.isArray(parsed.missions) ? parsed.missions : defaultState.missions,
-      rewards: Array.isArray(parsed.rewards) ? parsed.rewards : defaultState.rewards,
-      logs: Array.isArray(parsed.logs) ? parsed.logs : defaultState.logs,
-      categories: Array.isArray(parsed.categories) ? parsed.categories : defaultState.categories,
-      stats: {
-        ...defaultState.stats,
-        ...(parsed.stats || {}),
-        activity: Array.isArray(parsed.stats?.activity) ? parsed.stats.activity : defaultState.stats.activity,
-      },
-    };
-  } catch (error) {
-    console.warn('Estado local corrupto. Se reinicia con valores por defecto.', error);
-    localStorage.removeItem('itm_state');
-    return defaultState;
-  }
-}
-
-export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(loadSavedState);
-
+const Context = createContext<Store | undefined>(undefined);
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AppState>(loadState);
+  const [storageError, setStorageError] = useState("");
   useEffect(() => {
-    localStorage.setItem('itm_state', JSON.stringify(state));
+    try {
+      localStorage.setItem("itm_state", JSON.stringify(state));
+      setStorageError("");
+    } catch {
+      setStorageError(
+        "No hay espacio para guardar. Exporta una copia antes de cerrar.",
+      );
+    }
   }, [state]);
-
-  const updateState = (newState: Partial<AppState>) => {
-    setState(prev => ({ ...prev, ...newState }));
-  };
-
-  const handleGameOver = (prev: AppState, cause: string): AppState => {
-    if (typeof window !== 'undefined') {
-      alert(`¡SISTEMA COMPROMETIDO! ALCANZASTE 10 ESTRELLAS DE PENALIZACIÓN. SE HA CONFISCADO LA MITAD DE TU RESPETO Y TODOS TUS CRÉDITOS.\nCAUSA: ${cause}`);
-    }
-    const gameoverLog: LogEntry = {
-      id: Date.now().toString() + Math.random(),
-      name: `GAME OVER: ${cause}`,
-      timestamp: new Date().toLocaleString(),
-      points: -Math.floor(prev.respect / 2),
-      type: 'RESPECT',
-      passed: false
-    };
-    return {
-      ...prev,
-      strikes: 0,
-      respect: Math.floor(prev.respect / 2),
-      credits: 0,
-      logs: [gameoverLog, ...prev.logs]
-    };
-  };
-
-  const punish = () => {
-    setState(prev => {
-      const newStrikes = (prev.strikes || 0) + 1;
-      if (newStrikes >= 10) return handleGameOver({ ...prev, strikes: newStrikes }, 'MÚLTIPLES INFRACCIONES');
-      return { ...prev, strikes: newStrikes };
-    });
-  };
-
-  const removeMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission) return prev;
-      
-      const newStrikes = (prev.strikes || 0) + 1;
-      const nextState: AppState = {
-        ...prev,
-        missions: prev.missions.filter(m => m.id !== id),
-        strikes: newStrikes
-      };
-      
-      if (newStrikes >= 10) {
-        return handleGameOver(nextState, 'MISIÓN ELIMINADA');
-      }
-      return nextState;
-    });
-  };
-
-  const addReward = (reward: Reward) => {
-    setState(prev => ({
-      ...prev,
-      rewards: [...(prev.rewards || []), reward]
-    }));
-  };
-
-  const buyReward = (id: string) => {
-    setState(prev => {
-      const reward = prev.rewards?.find(r => r.id === id);
-      if (!reward || prev.credits < reward.cost) return prev;
-      
-      const newLog: LogEntry = {
-        id: Date.now().toString(),
-        name: `COMPRA: ${reward.name}`,
-        timestamp: new Date().toLocaleString(),
-        points: -reward.cost,
-        type: 'CREDITS',
-        passed: false
-      };
-
-      return {
-        ...prev,
-        credits: prev.credits - reward.cost,
-        rewards: prev.rewards?.filter(r => r.id !== id) || [],
-        logs: [newLog, ...prev.logs]
-      };
-    });
-  };
-
-  const resetAll = () => {
-    setState(blankState);
-  };
-
-  const addMission = (mission: Mission) => {
-    setState(prev => {
-      const categoryExists = prev.categories.some(c => c.name === mission.category);
-      let newCategories = prev.categories;
-      
-      if (!categoryExists && mission.category) {
-        newCategories = [...prev.categories, {
-           id: Date.now().toString() + Math.random(),
-           name: mission.category,
-           percentage: 0,
-           label: 'NUEVO'
-        }];
-      }
-
-      return { 
-        ...prev, 
-        categories: newCategories,
-        missions: [mission, ...prev.missions] 
-      };
-    });
-  };
-
-  const updateMission = (id: string, updates: Partial<Mission>) => {
-    setState(prev => ({
-      ...prev,
-      missions: prev.missions.map(m => m.id === id ? { ...m, ...updates } : m)
-    }));
-  };
-
-  const completeMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
-
-      const finishDate = new Date();
-      const elapsedMinutes = Math.floor((mission.durationSeconds - (mission.timeRemaining || 0)) / 60);
-      const timeStr = elapsedMinutes > 0 ? ` (${elapsedMinutes} MIN)` : '';
-
-      const passedLog: LogEntry = {
-        id: Date.now().toString(),
-        name: mission.name + timeStr,
-        timestamp: finishDate.toLocaleString(),
-        points: mission.rewardRespect,
-        type: 'RESPECT',
-        passed: true
-      };
-
-      const newStats = {
-        ...prev.stats,
-        totalMissions: prev.stats.totalMissions + 1,
-        score: prev.stats.score + mission.rewardCash + mission.rewardRespect,
-        streak: prev.stats.streak + 1,
-        activity: [...prev.stats.activity]
-      };
-      newStats.activity[6] = Math.min(100, newStats.activity[6] + 15);
-
-      let updatedCategories = [...prev.categories];
-      const catIndex = updatedCategories.findIndex(c => c.name === mission.category);
-      if (catIndex !== -1) {
-        const cat = updatedCategories[catIndex];
-        const newPct = Math.min(100, cat.percentage + Math.max(1, Math.floor(mission.rewardRespect / 100)));
-        let newLabel = cat.label;
-        if (newPct >= 100) newLabel = 'EL CAPO';
-        else if (newPct >= 75) newLabel = 'VETERANO';
-        else if (newPct >= 50) newLabel = 'AVANZADO';
-        else if (newPct >= 20) newLabel = 'ACTIVO';
-        
-        updatedCategories[catIndex] = {
-           ...cat,
-           percentage: newPct,
-           label: newLabel
-        };
-      }
-
-      return {
-        ...prev,
-        categories: updatedCategories,
-        respect: prev.respect + mission.rewardRespect,
-        credits: prev.credits + mission.rewardCash,
-        missions: prev.missions.map(m => m.id === id ? { ...m, status: 'PASSED' } as Mission : m),
-        logs: [passedLog, ...prev.logs],
-        stats: newStats
-      };
-    });
-  };
-
-  const failMission = (id: string) => {
-    setState(prev => {
-      const mission = prev.missions.find(m => m.id === id);
-      if (!mission || mission.status === 'PASSED' || mission.status === 'FAILED') return prev;
-
-      const finishDate = new Date();
-      const failedLog: LogEntry = {
-        id: Date.now().toString(),
-        name: `FALLO: ${mission.name}`,
-        timestamp: finishDate.toLocaleString(),
-        points: -Math.floor(mission.rewardRespect / 2),
-        type: 'RESPECT',
-        passed: false
-      };
-
-      const newStrikes = (prev.strikes || 0) + 1;
-      const nextState: AppState = {
-        ...prev,
-        strikes: newStrikes,
-        respect: Math.max(0, prev.respect - Math.floor(mission.rewardRespect / 2)),
-        missions: prev.missions.map(m => m.id === id ? { ...m, status: 'FAILED' } as Mission : m),
-        logs: [failedLog, ...prev.logs],
-        stats: {
-          ...prev.stats,
-          streak: 0
-        }
-      };
-
-      if (newStrikes >= 10) {
-        return handleGameOver(nextState, `FALLO EN ${mission.name}`);
-      }
-      
-      return nextState;
-    });
-  };
-
-  const addLog = (log: LogEntry) => {
-    setState(prev => ({ ...prev, logs: [log, ...prev.logs] }));
-  };
-
-  const addCategory = (name: string) => {
-    setState(prev => ({
-      ...prev,
-      categories: [...prev.categories, {
-        id: Date.now().toString(),
-        name,
-        percentage: 0,
-        label: 'NOVATO'
-      }]
-    }));
-  };
-
-  const removeCategory = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      categories: prev.categories.filter(c => c.id !== id)
-    }));
-  };
-
   useEffect(() => {
-    const lastDate = localStorage.getItem('itm_last_date');
-    const today = new Date().toLocaleDateString();
-    
-    if (lastDate && lastDate !== today) {
-      setState(prev => {
-        const newActivity = [...prev.stats.activity.slice(1), 0];
-        return {
-          ...prev,
-          stats: { ...prev.stats, activity: newActivity }
-        };
-      });
-    }
-    localStorage.setItem('itm_last_date', today);
+    soundManager.enabled = state.settings.sound;
+    document.documentElement.dataset.motion = state.settings.motion
+      ? "full"
+      : "reduced";
+  }, [state.settings.sound, state.settings.motion]);
+  useEffect(() => {
+    const tick = () => setState((s) => reconcile(s));
+    const timer = setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
+    };
   }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setState(prev => {
-        let changed = false;
-        const newMissions = prev.missions.map(m => {
-          if (m.status === 'ACTIVE' && m.timeRemaining !== undefined && m.timeRemaining > 0) {
-            changed = true;
-            const newTime = m.timeRemaining - 1;
-            if (newTime <= 0) {
-              return { ...m, status: 'VERIFY', timeRemaining: 0 } as Mission;
+  const updateState = (s: Partial<AppState>) =>
+    setState((p) => ({ ...p, ...s }));
+  const addMission = (mission: Mission) =>
+    setState((s) => ({
+      ...s,
+      missions: [mission, ...s.missions],
+      categories: s.categories.some((c) => c.name === mission.category)
+        ? s.categories
+        : [
+            ...s.categories,
+            {
+              id: uid(),
+              name: mission.category,
+              percentage: 0,
+              label: "NOVATO",
+            },
+          ],
+    }));
+  const updateMission = (id: string, updates: Partial<Mission>) =>
+    setState((s) => ({
+      ...s,
+      missions: s.missions.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+      categories:
+        updates.category &&
+        !s.categories.some((c) => c.name === updates.category)
+          ? [
+              ...s.categories,
+              {
+                id: uid(),
+                name: updates.category,
+                percentage: 0,
+                label: "NOVATO",
+              },
+            ]
+          : s.categories,
+    }));
+  const startMission = (id: string) =>
+    setState((s) => ({
+      ...s,
+      missions: s.missions.map((m) =>
+        m.id === id && m.status === "IDLE"
+          ? {
+              ...m,
+              status: "ACTIVE",
+              deadline:
+                Date.now() + (m.timeRemaining ?? m.durationSeconds) * 1000,
             }
-            return { ...m, timeRemaining: newTime };
-          }
-          return m;
-        });
-        
-        if (changed) {
-          return { ...prev, missions: newMissions };
-        }
-        return prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
+          : m,
+      ),
+    }));
+  const pauseMission = (id: string) =>
+    setState((s) => ({
+      ...s,
+      missions: s.missions.map((m) =>
+        m.id === id && m.status === "ACTIVE"
+          ? {
+              ...m,
+              status: "IDLE",
+              deadline: undefined,
+              timeRemaining: Math.max(
+                0,
+                Math.ceil(((m.deadline ?? Date.now()) - Date.now()) / 1000),
+              ),
+            }
+          : m,
+      ),
+    }));
+  const removeMission = (id: string) =>
+    setState((s) => {
+      if (!s.missions.some((m) => m.id === id)) return s;
+      const next = { ...s, missions: s.missions.filter((m) => m.id !== id) };
+      return s.settings.penalizeDelete ? applyPenalty(next, 1) : next;
+    });
+  const buyReward = (id: string) =>
+    setState((s) => {
+      const r = s.rewards.find((r) => r.id === id);
+      if (!r || s.credits < r.cost) return s;
+      return {
+        ...s,
+        credits: s.credits - r.cost,
+        rewards: s.rewards.filter((r) => r.id !== id),
+        logs: [
+          newLog(`Compra: ${r.name}`, -r.cost, "CREDITS", "purchase"),
+          ...s.logs,
+        ],
+      };
+    });
+  const claimBonus = () =>
+    setState((s) =>
+      s.lastBonusDate === dayKey()
+        ? s
+        : {
+            ...s,
+            lastBonusDate: dayKey(),
+            credits: s.credits + 2000,
+            logs: [newLog("Bonus diario", 2000, "CREDITS", "bonus"), ...s.logs],
+          },
+    );
+  const buySoborno = () =>
+    setState((s) =>
+      s.credits < 5000 || s.strikes === 0
+        ? s
+        : {
+            ...s,
+            credits: s.credits - 5000,
+            strikes: s.strikes - 1,
+            logs: [
+              newLog("Una estrella menos", -5000, "CREDITS", "purchase"),
+              ...s.logs,
+            ],
+          },
+    );
+  const saveRule = (r: PenaltyRule) =>
+    setState((s) => ({
+      ...s,
+      penaltyRules: s.penaltyRules.some((x) => x.id === r.id)
+        ? s.penaltyRules.map((x) => (x.id === r.id ? r : x))
+        : [...s.penaltyRules, r],
+    }));
+  const completeConsequence = (id: string) =>
+    setState((s) => {
+      const c = s.consequences.find((c) => c.id === id && !c.completedAt);
+      return !c
+        ? s
+        : {
+            ...s,
+            consequences: s.consequences.map((c) =>
+              c.id === id ? { ...c, completedAt: new Date().toISOString() } : c,
+            ),
+            logs: [
+              newLog(
+                `Consecuencia cumplida: ${c.name}`,
+                0,
+                "RESPECT",
+                "penalty",
+              ),
+              ...s.logs,
+            ],
+          };
+    });
   return (
-    <StoreContext.Provider value={{ state, updateState, resetAll, addMission, updateMission, removeMission, completeMission, failMission, addLog, addCategory, removeCategory, punish, addReward, buyReward }}>
+    <Context.Provider
+      value={{
+        state,
+        storageError,
+        updateState,
+        addMission,
+        updateMission,
+        startMission,
+        pauseMission,
+        removeMission,
+        buyReward,
+        claimBonus,
+        buySoborno,
+        saveRule,
+        completeConsequence,
+        resetAll: () => setState(initialState(false)),
+        completeMission: (id) =>
+          setState((s) => finishMission(reconcile(s), id, true)),
+        failMission: (id) =>
+          setState((s) => finishMission(reconcile(s), id, false)),
+        addLog: (l) => setState((s) => ({ ...s, logs: [l, ...s.logs] })),
+        addCategory: (name) =>
+          setState((s) =>
+            s.categories.some((c) => c.name === name)
+              ? s
+              : {
+                  ...s,
+                  categories: [
+                    ...s.categories,
+                    { id: uid(), name, percentage: 0, label: "NOVATO" },
+                  ],
+                },
+          ),
+        removeCategory: (id) =>
+          setState((s) => ({
+            ...s,
+            categories: s.categories.filter((c) => c.id !== id),
+          })),
+        punish: () =>
+          setState((s) => (s.settings.penalizeReject ? applyPenalty(s, 1) : s)),
+        addReward: (r) =>
+          setState((s) => ({ ...s, rewards: [...s.rewards, r] })),
+        setSettings: (settings) =>
+          setState((s) => ({ ...s, settings: { ...s.settings, ...settings } })),
+        deleteRule: (id) =>
+          setState((s) => ({
+            ...s,
+            penaltyRules: s.penaltyRules.filter((r) => r.id !== id),
+          })),
+        restore: (data) => setState(migrate(data)),
+      }}
+    >
       {children}
-    </StoreContext.Provider>
+    </Context.Provider>
   );
 }
-
 export function useStore() {
-  const context = useContext(StoreContext);
-  if (context === undefined) {
-    throw new Error('useStore must be used within a StoreProvider');
-  }
-  return context;
+  const value = useContext(Context);
+  if (!value) throw new Error("StoreProvider missing");
+  return value;
 }

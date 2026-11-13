@@ -1,88 +1,138 @@
-import { useState } from 'react';
-import { TopBar } from './components/TopBar';
-import { BottomNav } from './components/BottomNav';
-import { MissionsView } from './views/MissionsView';
-import { ProgressView } from './views/ProgressView';
-import { StatsView } from './views/StatsView';
-import { LogView } from './views/LogView';
-import { SpinView } from './views/SpinView';
-import { StoreView } from './views/StoreView';
-import { Tab } from './types';
-import { soundManager } from './utils/audio';
-import { StoreProvider, useStore } from './context/StoreContext';
+import { useEffect, useState } from "react";
+import {
+  AnimatePresence,
+  motion,
+  MotionConfig,
+  useReducedMotion,
+} from "motion/react";
+import { TopBar } from "./components/TopBar";
+import { BottomNav } from "./components/BottomNav";
+import { MissionsView } from "./views/MissionsView";
+import { ProgressView } from "./views/ProgressView";
+import { LogView } from "./views/LogView";
+import { SpinView } from "./views/SpinView";
+import { StoreView } from "./views/StoreView";
+import { SettingsView } from "./views/SettingsView";
+import { FocusMission, Celebration } from "./components/FocusMission";
+import { StoreProvider, useStore } from "./context/StoreContext";
+import { soundManager } from "./utils/audio";
+import type { Tab } from "./types";
+import { lockBody } from "./utils/bodyLock";
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<Tab>('MISSIONS');
-  const [showMeme, setShowMeme] = useState(false);
-  const { state, resetAll } = useStore();
-
-  const handleReset = () => {
-    const confirmed = window.confirm('¿Reiniciar toda la partida? Se borrarán misiones, progreso, créditos y registro local.');
-    if (!confirmed) return;
-
-    soundManager.playAlert();
-    setShowMeme(true);
-    setTimeout(() => {
-      resetAll();
-      setActiveTab('MISSIONS');
-      setShowMeme(false);
-    }, 2500);
+  const { state, storageError } = useStore();
+  const reduce = useReducedMotion();
+  const [tab, setTab] = useState<Tab>("MISSIONS");
+  const [focus, setFocus] = useState<string>();
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => {
+      document.documentElement.style.setProperty(
+        "--visible-height",
+        `${viewport.height}px`,
+      );
+      document.documentElement.style.setProperty(
+        "--keyboard-inset",
+        `${Math.max(0, innerHeight - viewport.height - viewport.offsetTop)}px`,
+      );
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
+  const [celebration, setCelebration] = useState<{
+    name: string;
+    cash: number;
+    xp: number;
+  }>();
+  useEffect(() => {
+    if (!focus && !celebration) return;
+    return lockBody();
+  }, [focus, celebration]);
+  const navigate = (next: Tab) => {
+    soundManager.playClick();
+    setTab(next);
+    window.scrollTo({ top: 0, behavior: "instant" });
   };
-
-  const renderView = () => {
-    switch (activeTab) {
-      case 'MISSIONS':
-        return <MissionsView />;
-      case 'PROGRESS':
-        return <ProgressView />;
-      case 'STATS':
-        return <StatsView />;
-      case 'STORE':
-        return <StoreView />;
-      case 'LOG':
-        return <LogView />;
-      case 'SPIN':
-        return <SpinView onMissionAccepted={() => setActiveTab('MISSIONS')} />;
-      default:
-        return <MissionsView />;
-    }
-  };
-
+  const view =
+    tab === "MISSIONS" ? (
+      <MissionsView onFocus={setFocus} />
+    ) : tab === "SPIN" ? (
+      <SpinView
+        onMissionAccepted={(id) => {
+          setTab("MISSIONS");
+          setFocus(id);
+        }}
+      />
+    ) : tab === "STORE" ? (
+      <StoreView />
+    ) : tab === "PROGRESS" || tab === "STATS" ? (
+      <ProgressView onHistory={() => navigate("LOG")} />
+    ) : tab === "LOG" ? (
+      <LogView onBack={() => navigate("PROGRESS")} />
+    ) : (
+      <SettingsView onBack={() => navigate("MISSIONS")} />
+    );
   return (
-    <div className="min-h-[100dvh] bg-background relative flex flex-col selection:bg-primary selection:text-on-primary overflow-hidden">
-      <div className="fixed inset-0 city-grit z-0" />
-      <div className="fixed inset-x-0 bottom-0 h-1/2 vice-grid z-0 opacity-70" />
-      <div className="fixed inset-0 retro-scanline z-40 opacity-10 pointer-events-none" />
-      <div className="fixed -left-32 top-24 h-64 w-64 rounded-full bg-primary/20 blur-3xl z-0" />
-      <div className="fixed -right-24 top-10 h-72 w-72 rounded-full bg-secondary/10 blur-3xl z-0" />
-
-      {showMeme && (
-        <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center animate-in fade-in duration-300">
-          <img 
-            src="/here_we_go_again.png" 
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              if (target.src.endsWith('.png')) target.src = '/here_we_go_again.jpg';
-              else target.src = 'https://i.kym-cdn.com/entries/icons/original/000/029/322/ahshit.jpg';
-            }}
-            alt="Reset en curso" 
-            className="max-w-full max-h-[70vh] object-contain px-4 drop-shadow-2xl"
-          />
-          <p className="mt-4 text-primary font-black uppercase tracking-[0.35em] animate-pulse">Reiniciando partida</p>
+    <MotionConfig reducedMotion={state.settings.motion ? "user" : "always"}>
+      <div
+        className={`app-shell ${tab === "MISSIONS" ? "home-scene" : "inner-scene"}`}
+      >
+        <div className="coastal-background" aria-hidden="true" />
+        <div className="scene-shade" aria-hidden="true" />
+        <div className="film-grain" aria-hidden="true" />
+        <div
+          inert={Boolean(focus || celebration)}
+          aria-hidden={focus || celebration ? true : undefined}
+        >
+          <TopBar onSettings={() => navigate("SETTINGS")} />
+          {storageError && (
+            <p className="storage-warning" role="alert">
+              {storageError}
+            </p>
+          )}
+          <main id="main-content">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={tab}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{
+                  duration: state.settings.motion && !reduce ? 0.2 : 0,
+                }}
+              >
+                {view}
+              </motion.div>
+            </AnimatePresence>
+          </main>
+          <BottomNav activeTab={tab} onChangeTab={navigate} />
         </div>
-      )}
-
-      <TopBar respect={state.respect} credits={state.credits} strikes={state.strikes} onReset={handleReset} />
-      
-      <main className="flex-grow relative z-10 w-full overflow-x-hidden">
-        {renderView()}
-      </main>
-
-      <BottomNav activeTab={activeTab} onChangeTab={setActiveTab} />
-    </div>
+        {focus && (
+          <FocusMission
+            id={focus}
+            onClose={() => setFocus(undefined)}
+            onComplete={(name, cash, xp) => {
+              setFocus(undefined);
+              setCelebration({ name, cash, xp });
+            }}
+          />
+        )}
+        {celebration && (
+          <Celebration
+            {...celebration}
+            onClose={() => setCelebration(undefined)}
+          />
+        )}
+      </div>
+    </MotionConfig>
   );
 }
-
 export default function App() {
   return (
     <StoreProvider>

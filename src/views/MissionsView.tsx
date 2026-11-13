@@ -1,428 +1,699 @@
-import { MapPin, Clock, Trash2, Plus, X, Check } from 'lucide-react';
-import { soundManager } from '../utils/audio';
-import { useStore } from '../context/StoreContext';
-import React, { useRef, useState } from 'react';
-import { getRankData } from '../utils/leveling';
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  Clock3,
+  Download,
+  ListFilter,
+  List,
+  MapPin,
+  Pencil,
+  Play,
+  Plus,
+  Repeat2,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useStore } from "../context/StoreContext";
+import { Sheet } from "../components/Sheet";
+import type { Mission, Difficulty } from "../types";
+import { starterMissions, uid } from "../utils/game";
+import { downloadFile, exportMissions, importMissions } from "../utils/csv";
+import { soundManager } from "../utils/audio";
 
-export function MissionsView() {
-  const { state, updateState, updateMission, addMission, removeMission, completeMission, failMission } = useStore();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    difficulty: 'NORMAL',
-    location: '',
-    durationMinutes: 30,
-    rewardCash: 1000,
-    rewardRespect: 100,
-    category: 'TRABAJO'
-  });
-
-  const toggleMission = (id: string, status: string) => {
-    soundManager.playClick();
-    if (status === 'IDLE') {
-      updateMission(id, { status: 'ACTIVE' });
-    } else if (status === 'ACTIVE') {
-      updateMission(id, { status: 'IDLE' });
-    }
-  };
-
-  const deleteMission = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    soundManager.playError();
-    removeMission(id);
-  };
-
-  const handleManualSubmit = () => {
-    if (!formData.name.trim() || !formData.location.trim() || !formData.category.trim()) {
-      soundManager.playError();
-      return;
-    }
-    soundManager.playAccept();
-    addMission({
-      id: Date.now().toString(),
-      name: formData.name.trim().toUpperCase(),
-      difficulty: formData.difficulty.toUpperCase() as any,
-      location: formData.location.trim().toUpperCase(),
-      durationSeconds: formData.durationMinutes * 60,
-      rewardCash: formData.rewardCash,
-      rewardRespect: formData.rewardRespect,
-      status: 'IDLE',
-      timeRemaining: formData.durationMinutes * 60,
-      category: formData.category.trim().toUpperCase()
-    });
-    setShowAddForm(false);
-    setFormData({ name: '', difficulty: 'NORMAL', location: '', durationMinutes: 30, rewardCash: 1000, rewardRespect: 100, category: 'TRABAJO' });
-  };
-
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const getDiffColor = (diff: string) => {
-    if (diff === 'EASY') return 'bg-secondary-container text-on-secondary-container';
-    if (diff === 'HARD') return 'bg-error text-white';
-    return 'bg-tertiary text-black';
-  };
-
-  const downloadTemplateArea = () => {
-    soundManager.playHover();
-    const headers = "NOMBRE,DIFICULTAD,UBICACION,DURACION_MINUTOS,RECOMPENSA_CASH,RECOMPENSA_RESPETO,CATEGORIA\n";
-    const example = "NUEVO OBJETIVO,NORMAL,CENTRO CIUDAD,30,1500,200,TRABAJO\nATRACO NOCTURNO,HARD,BANCO,60,5000,1000,DINERO\n";
-    const currentMissions = state.missions.map(m => 
-      `${m.name},${m.difficulty},${m.location},${Math.floor(m.durationSeconds / 60)},${m.rewardCash},${m.rewardRespect},${m.category}`
-    ).join('\n');
-    
-    // We will now include the example at the top of the file so users see the format clearly
-    // but we can just use current missions if they exist, else show example
-    const csvContent = headers + (currentMissions ? (currentMissions + '\n' + example) : example);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const dt = new Date().toISOString().split('T')[0];
-    link.setAttribute("download", `plantilla_misiones_${dt}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleImportClick = () => {
-    soundManager.playClick();
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-        
-        let newMissions = [];
-        let newCategories = new Set<string>();
-
-        // Skip header line (index 0)
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(';').map(c => c.trim()); // Sometimes it's semicolon separated in ES, but we will try split by comma if semicolon isn't there
-          let actualCols = cols;
-          if (cols.length < 7) {
-            actualCols = lines[i].split(',').map(c => c.trim());
-          }
-
-          if (actualCols.length >= 7) {
-             const category = actualCols[6].toUpperCase();
-            newMissions.push({
-              id: Date.now().toString() + i,
-              name: actualCols[0].toUpperCase(),
-              difficulty: actualCols[1].toUpperCase() as any,
-              location: actualCols[2].toUpperCase(),
-              durationSeconds: parseInt(actualCols[3]) * 60,
-              rewardCash: parseInt(actualCols[4]),
-              rewardRespect: parseInt(actualCols[5]),
-              status: 'IDLE',
-              timeRemaining: parseInt(actualCols[3]) * 60,
-              category
-            });
-            newCategories.add(category);
-          }
-        }
-        if (newMissions.length > 0) {
-           const existingCategories = new Set(state.categories.map(c => c.name));
-           const categoriesToAdd = Array.from(newCategories).filter(c => !existingCategories.has(c));
-           
-        let nextState = { ...state, missions: [...newMissions, ...state.missions] };
-           if (categoriesToAdd.length > 0) {
-             // We can just add categories to the state manually to avoid calling multiple actions sequentially
-             const nextCats = [...state.categories];
-             categoriesToAdd.forEach(cat => {
-                nextCats.push({
-                  id: Date.now().toString() + Math.random(),
-                  name: cat,
-                  percentage: nextCats.length > 0 ? nextCats[0].percentage : 25,
-                  label: cat.substring(0, 3)
-                });
-             });
-             nextState.categories = nextCats;
-           }
-
-           updateState(nextState);
-           soundManager.playJackpot();
-           alert(`SE IMPORTARON ${newMissions.length} MISIONES CON ÉXITO`);
-        } else {
-           throw new Error("No valid rows");
-        }
-      } catch (error) {
-        soundManager.playError();
-        alert('ARCHIVO CSV DAÑADO O FORMATO INVÁLIDO.');
-      }
-    };
-    reader.readAsText(file); // Default UTF-8
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const { rank, percentage } = getRankData(state.respect);
-  const blocks = Math.floor(percentage / 10);
-
+export const difficultyNames: Record<Difficulty, string> = {
+  EASY: "Suave",
+  NORMAL: "A tu ritmo",
+  HARD: "Exigente",
+  VETERAN: "Veterano",
+  EXTREME: "Extremo",
+  INSANE: "Sin límites",
+};
+export const timeText = (seconds: number) =>
+  `${Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0")}:${Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0")}`;
+export function MissionForm({
+  mission,
+  onClose,
+}: {
+  mission?: Mission;
+  onClose: () => void;
+}) {
+  const { state, addMission, updateMission } = useStore();
+  const [name, setName] = useState(mission?.name ?? "");
+  const [category, setCategory] = useState(
+    mission?.category ?? state.categories[0]?.name ?? "PERSONAL",
+  );
+  const [location, setLocation] = useState(
+    mission?.location ?? "Donde quieras",
+  );
+  const [minutes, setMinutes] = useState(
+    String((mission?.durationSeconds ?? 1500) / 60),
+  );
+  const [difficulty, setDifficulty] = useState<Difficulty>(
+    mission?.difficulty ?? "NORMAL",
+  );
+  const [cash, setCash] = useState(String(mission?.rewardCash ?? 500));
+  const [respect, setRespect] = useState(String(mission?.rewardRespect ?? 100));
+  const [recurrence, setRecurrence] = useState<Mission["recurrence"]>(
+    mission?.recurrence ?? "none",
+  );
   return (
-    <div className="pt-[calc(6rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] px-4 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-xl font-bold uppercase text-on-surface">OBJETIVOS ACTUALES</h2>
-        <div className="flex flex-wrap gap-2">
-          <button 
-            className="bg-surface-variant px-3 py-1 border-2 border-on-surface text-xs font-bold hover:bg-on-surface hover:text-surface transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={downloadTemplateArea}
-          >
-            PLANTILLA CSV
-          </button>
-          <button 
-            className="bg-primary text-on-primary px-3 py-1 border-2 border-black text-xs font-bold hover:brightness-110 transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={handleImportClick}
-          >
-            IMPORTAR CSV
-          </button>
-          <button 
-            className="bg-secondary text-on-secondary px-3 py-1 border-2 border-black text-xs font-bold hover:brightness-110 transition-all active:translate-x-1 active:translate-y-1 rounded-none flex items-center justify-center gap-1"
-            onClick={() => {
-               soundManager.playClick();
-               setShowAddForm(!showAddForm);
-            }}
-          >
-            {showAddForm ? <X size={14} /> : <Plus size={14} />} 
-            MANUAL
-          </button>
-          <input 
-            type="file" 
-            accept=".csv" 
-            className="hidden" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
+    <Sheet
+      title={mission ? "Dale otra forma" : "Tu próxima misión"}
+      onClose={onClose}
+    >
+      <form
+        className="form-stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim() || !category.trim() || !location.trim()) return;
+          const duration = Math.round(Number(minutes) * 60);
+          const values = {
+            name: name.trim(),
+            category: category.trim().toUpperCase(),
+            location: location.trim(),
+            difficulty,
+            durationSeconds: duration,
+            rewardCash: Number(cash),
+            rewardRespect: Number(respect),
+            recurrence,
+          };
+          if (mission)
+            updateMission(mission.id, {
+              ...values,
+              timeRemaining:
+                mission.durationSeconds === duration
+                  ? mission.timeRemaining
+                  : duration,
+            });
+          else
+            addMission({
+              id: uid(),
+              ...values,
+              status: "IDLE",
+              timeRemaining: duration,
+            });
+          soundManager.playAccept();
+          onClose();
+        }}
+      >
+        <label>
+          ¿Qué vas a hacer?
+          <input
+            autoFocus
+            required
+            maxLength={120}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ese pequeño gran paso…"
           />
+        </label>
+        <div className="form-pair">
+          <label>
+            Minutos
+            <input
+              required
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              value={minutes}
+              onChange={(e) => setMinutes(e.target.value)}
+            />
+          </label>
+          <label>
+            Se repite
+            <select
+              value={recurrence}
+              onChange={(e) =>
+                setRecurrence(e.target.value as Mission["recurrence"])
+              }
+            >
+              <option value="none">Una vez</option>
+              <option value="daily">Cada día</option>
+              <option value="weekdays">De lunes a viernes</option>
+              <option value="weekly">Cada semana</option>
+            </select>
+          </label>
         </div>
-      </div>
-
-      {showAddForm && (
-        <div className="bg-surface border-4 border-secondary p-4 mb-6 hard-shadow animate-in slide-in-from-top-4 duration-300">
-          <h3 className="text-xl font-bold text-secondary uppercase mb-4">DATOS NUEVO OBJETIVO</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1 sm:col-span-2">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DESIGNACIÓN</label>
-              <input 
-                type="text"
-                value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
+        <label>
+          Tu territorio
+          <input
+            required
+            list="categories"
+            maxLength={40}
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+          <datalist id="categories">
+            {state.categories.map((c) => (
+              <option key={c.id} value={c.name} />
+            ))}
+          </datalist>
+        </label>
+        <details className="advanced">
+          <summary>
+            Más detalles <span>Ya están preparados</span>
+          </summary>
+          <div className="form-stack">
+            <label>
+              Ubicación
+              <input
+                required
+                maxLength={80}
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
               />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">CATEGORÍA</label>
-              <input 
-                type="text"
-                value={formData.category}
-                onChange={e => setFormData({ ...formData, category: e.target.value })}
-                placeholder="EJ. TRABAJO, SALUD..."
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">UBICACIÓN</label>
-              <input 
-                type="text"
-                value={formData.location}
-                onChange={e => setFormData({ ...formData, location: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DIFICULTAD</label>
-              <select 
-                value={formData.difficulty}
-                onChange={e => setFormData({ ...formData, difficulty: e.target.value })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none uppercase"
+            </label>
+            <label>
+              Dificultad
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value as Difficulty)}
               >
-                <option value="EASY">FÁCIL</option>
-                <option value="NORMAL">NORMAL</option>
-                <option value="HARD">DIFÍCIL</option>
+                {Object.entries(difficultyNames).map(([v, n]) => (
+                  <option key={v} value={v}>
+                    {n}
+                  </option>
+                ))}
               </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">DURACIÓN (MIN)</label>
-              <input 
-                type="number"
-                min="1"
-                value={formData.durationMinutes}
-                onChange={e => setFormData({ ...formData, durationMinutes: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">RECOMPENSA (DINERO)</label>
-              <input 
-                type="number"
-                min="0"
-                value={formData.rewardCash}
-                onChange={e => setFormData({ ...formData, rewardCash: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-on-surface-variant uppercase">RECOMPENSA (RESPETO)</label>
-              <input 
-                type="number"
-                min="0"
-                value={formData.rewardRespect}
-                onChange={e => setFormData({ ...formData, rewardRespect: parseInt(e.target.value) || 0 })}
-                className="w-full bg-background border-2 border-secondary p-2 text-secondary font-bold focus:outline-none"
-              />
+            </label>
+            <div className="form-pair">
+              <label>
+                Créditos
+                <input
+                  type="number"
+                  min="0"
+                  max="1000000"
+                  required
+                  value={cash}
+                  onChange={(e) => setCash(e.target.value)}
+                />
+              </label>
+              <label>
+                Respeto
+                <input
+                  type="number"
+                  min="0"
+                  max="100000"
+                  required
+                  value={respect}
+                  onChange={(e) => setRespect(e.target.value)}
+                />
+              </label>
             </div>
           </div>
-          <button 
-             onClick={handleManualSubmit}
-             className="w-full mt-4 bg-secondary text-on-secondary font-black tracking-widest uppercase p-4 border-2 border-black hard-shadow active:translate-x-1 active:translate-y-1 active:shadow-none transition-all hover:brightness-110 rounded-none"
-          >
-            INICIALIZAR OBJETIVO
-          </button>
+        </details>
+        <button className="primary-button" type="submit">
+          {mission ? "Guardar cambios" : "Añadir misión"}
+          <ArrowRight size={19} />
+        </button>
+      </form>
+    </Sheet>
+  );
+}
+export function Consequences({ onClose }: { onClose: () => void }) {
+  const { state, completeConsequence } = useStore();
+  const pending = state.consequences.filter((c) => !c.completedAt);
+  return (
+    <Sheet title="Toca cumplir" onClose={onClose}>
+      <p className="supporting">
+        Las consecuencias que elegiste. Una a una, también se resuelven.
+      </p>
+      {pending.length === 0 ? (
+        <div className="empty-state">
+          <Check />
+          <h3>Todo en paz.</h3>
+          <p>No tienes consecuencias pendientes.</p>
         </div>
-      )}
-
-      <div className="mb-10">
-        <div className="flex justify-between mb-2">
-          <span className="text-xs font-bold text-tertiary uppercase italic">RANGO: {rank}</span>
-          <span className="text-xs font-bold text-tertiary">{percentage}%</span>
-        </div>
-        <div className="h-6 w-full bg-surface-container border-2 border-primary flex p-0.5 gap-1">
-            {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className={`h-full w-[10%] ${i < blocks ? 'bg-tertiary' : 'bg-surface-container-high'}`} />
-            ))}
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        {state.missions.length === 0 && (
-           <div className="p-8 text-center border-2 border-dashed border-on-surface-variant/50 text-on-surface-variant uppercase font-bold text-sm">
-             SIN MISIONES ACTIVAS
-           </div>
-        )}
-        {[...state.missions].sort((a, b) => {
-          if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
-          if (b.status === 'ACTIVE' && a.status !== 'ACTIVE') return 1;
-          if (a.status === 'VERIFY' && b.status !== 'VERIFY') return -1;
-          if (b.status === 'VERIFY' && a.status !== 'VERIFY') return 1;
-          return 0;
-        }).map(mission => {
-           const isActive = mission.status === 'ACTIVE';
-           const isPassed = mission.status === 'PASSED';
-           const isVerify = mission.status === 'VERIFY';
-           const progressPercent = mission.timeRemaining ? ((mission.durationSeconds - mission.timeRemaining) / mission.durationSeconds) * 100 : 100;
-           
-           return (
-            <div 
-              key={mission.id}
-              onClick={() => !isPassed && toggleMission(mission.id, mission.status)}
-              className={`
-                bg-surface border-2 p-4 cursor-pointer transition-all active:translate-x-1 active:translate-y-1 group relative
-                ${isActive ? 'border-primary ring-2 ring-primary shadow-[0_0_20px_rgba(var(--color-primary),0.3)] translate-x-1 translate-y-1' : 'border-primary-container hard-shadow'}
-                ${isPassed ? 'opacity-50 pointer-events-none' : ''}
-                ${isVerify ? 'border-tertiary shadow-[0_0_15px_rgba(var(--color-tertiary),0.6)]' : ''}
-              `}
-            >
-              {isActive && (
-                <div className="absolute -top-3 -left-3 bg-primary text-background font-black uppercase text-[10px] px-2 py-1 rotate-[-5deg] z-20 border-2 border-background">
-                  EN CURSO
-                </div>
-              )}
-              <button 
-                onClick={(e) => deleteMission(mission.id, e)}
-                className="absolute top-2 right-2 text-error opacity-0 group-hover:opacity-100 hover:scale-110 transition-all bg-surface p-1 rounded-none border border-error z-10"
-              >
-                 <Trash2 size={16} />
-              </button>
-
-              <div className="flex justify-between items-start mb-2 pr-8">
-                <div>
-                  <h3 className="text-xl font-bold text-primary-container uppercase">{mission.name}</h3>
-                  <p className="text-[10px] text-tertiary uppercase font-black">{mission.category}</p>
-                </div>
-                <span className={`px-2 py-0.5 text-[10px] font-bold uppercase ${getDiffColor(mission.difficulty)}`}>
-                  DIFICULTAD: {mission.difficulty}
-                </span>
-              </div>
-              
-              <div className="flex items-center gap-2 text-on-surface-variant mb-6 text-sm">
-                <MapPin size={16} />
-                <span className="font-bold uppercase">{mission.location}</span>
-                <span className="mx-2 text-outline">|</span>
-                <Clock size={16} />
-                <span className={`font-bold uppercase tabular-nums ${isActive ? 'text-primary' : ''} ${isVerify ? 'text-error animate-pulse' : ''}`}>
-                  {formatTime(mission.timeRemaining || 0)}
-                </span>
-              </div>
-
-              <div className="h-1.5 w-full bg-surface-container-highest mb-4 overflow-hidden">
-                <div 
-                  className={`h-full transition-all duration-1000 ${isActive ? 'bg-primary' : isPassed || isVerify ? 'bg-tertiary' : 'bg-primary-container'}`} 
-                  style={{ width: `${isPassed || isVerify ? 100 : progressPercent}%` }} 
-                />
-              </div>
-
-              {isActive && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    soundManager.playJackpot();
-                    completeMission(mission.id);
-                  }}
-                  className="w-full mb-4 bg-primary text-background font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
-                >
-                  <Check size={20} />
-                  COMPLETAR AHORA
-                </button>
-              )}
-
-              {isVerify && (
-                <div className="flex flex-col gap-2 mb-4">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      soundManager.playJackpot();
-                      completeMission(mission.id);
-                    }}
-                    className="w-full bg-tertiary text-on-tertiary font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
-                  >
-                    <Check size={20} />
-                    VERIFICAR Y COMPLETAR
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      soundManager.playError();
-                      failMission(mission.id);
-                    }}
-                    className="w-full bg-error text-white font-black tracking-widest uppercase p-3 border-2 border-black hard-shadow hover:brightness-110 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex justify-center items-center gap-2"
-                  >
-                    <X size={20} />
-                    FALLIDA (-1 ESTRELLA)
-                  </button>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-primary uppercase">
-                  RECOMPENSA: ${mission.rewardCash} + {mission.rewardRespect} RESPETO
-                </span>
-                {isActive && <div className="text-tertiary font-bold animate-pulse text-sm">MISIÓN ACTIVA...</div>}
-                {isVerify && <div className="text-tertiary font-bold animate-pulse text-sm">PENDIENTE...</div>}
-                {isPassed && <div className="text-tertiary font-bold text-sm uppercase">MISIÓN COMPLETADA</div>}
-              </div>
+      ) : (
+        pending.map((c) => (
+          <div className="consequence-row" key={c.id}>
+            <div>
+              <small>{new Date(c.createdAt).toLocaleDateString("es-ES")}</small>
+              <h3>{c.name}</h3>
             </div>
-          );
-        })}
+            <button
+              className="icon-button"
+              aria-label={`Marcar como realizada: ${c.name}`}
+              onClick={() => completeConsequence(c.id)}
+            >
+              <Check size={22} />
+            </button>
+          </div>
+        ))
+      )}
+    </Sheet>
+  );
+}
+export function MissionsView({ onFocus }: { onFocus: (id: string) => void }) {
+  const { state, removeMission, addMission, startMission } = useStore();
+  const [selected, setSelected] = useState<string>();
+  const [sheet, setSheet] = useState<
+    "list" | "new" | "filter" | "consequences" | null
+  >(null);
+  const [edit, setEdit] = useState<Mission>();
+  const [category, setCategory] = useState("Todas");
+  const [query, setQuery] = useState("");
+  const [listStatus, setListStatus] = useState("open");
+  const [message, setMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  const available = state.missions
+    .filter(
+      (m) =>
+        ["IDLE", "ACTIVE", "VERIFY"].includes(m.status) &&
+        (category === "Todas" || m.category === category),
+    )
+    .sort((a, b) => {
+      const priority = { VERIFY: 0, ACTIVE: 1, IDLE: 2, PASSED: 3, FAILED: 3 };
+      return priority[a.status] - priority[b.status];
+    });
+  const index = Math.max(
+    0,
+    available.findIndex((m) => m.id === selected),
+  );
+  const mission = available[index];
+  const active = state.missions.find(
+    (m) => m.status === "ACTIVE" || m.status === "VERIFY",
+  );
+  const choose = (step: number) => {
+    if (!available.length) return;
+    setSelected(
+      available[(index + step + available.length) % available.length].id,
+    );
+    soundManager.playClick();
+  };
+  const pending = state.consequences.filter((c) => !c.completedAt).length;
+  const list = state.missions.filter(
+    (m) =>
+      (category === "Todas" || m.category === category) &&
+      m.name.toLowerCase().includes(query.toLowerCase()) &&
+      (listStatus === "open"
+        ? ["IDLE", "ACTIVE", "VERIFY"].includes(m.status)
+        : listStatus === "passed"
+          ? m.status === "PASSED"
+          : m.status === "FAILED"),
+  );
+  const begin = (m: Mission) => {
+    if (m.status === "IDLE") startMission(m.id);
+    soundManager.playAccept();
+    onFocus(m.id);
+  };
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(""), 5000);
+    return () => clearTimeout(t);
+  }, [message]);
+  return (
+    <div className="mission-page">
+      <div className="scene-caption">
+        <span className="live-dot" /> TU TIEMPO. TUS REGLAS.
+        <span className="edition">VOL. 01</span>
       </div>
+      <div className="scene-title animate__animated animate__fadeInDown">
+        <span>HAZ QUE</span>
+        <span>
+          CUENTE<span className="title-dot">.</span>
+        </span>
+        <p>Un pequeño paso. Una buena historia.</p>
+      </div>
+      <div className="mission-tools">
+        <button className="text-button" onClick={() => setSheet("filter")}>
+          <ListFilter size={16} />
+          {category === "Todas" ? "Todos los territorios" : category}
+          <ChevronRight size={14} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Todas tus misiones"
+          onClick={() => setSheet("list")}
+        >
+          <List size={20} />
+        </button>
+        <button
+          className="icon-button"
+          aria-label="Nueva misión"
+          onClick={() => setSheet("new")}
+        >
+          <Plus size={22} />
+        </button>
+      </div>
+      {active && active.id !== mission?.id && (
+        <button className="active-strip" onClick={() => onFocus(active.id)}>
+          <span className="live-dot" />
+          Una misión sigue en marcha <ArrowRight size={16} />
+        </button>
+      )}
+      <section
+        className="mission-deck"
+        aria-label="Seleccionar misión"
+        onTouchStart={(e) => {
+          touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }}
+        onTouchEnd={(e) => {
+          if (!touch.current) return;
+          const dx = e.changedTouches[0].clientX - touch.current.x;
+          const dy = e.changedTouches[0].clientY - touch.current.y;
+          if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4)
+            choose(dx < 0 ? 1 : -1);
+          touch.current = null;
+        }}
+      >
+        {mission ? (
+          <article
+            key={mission.id}
+            className={`mission-ticket animate__animated animate__fadeInRight ${mission.status === "ACTIVE" ? "is-active" : ""}`}
+          >
+            <div className="ticket-top">
+              <span className="eyebrow">
+                MISIÓN {String(index + 1).padStart(2, "0")}{" "}
+                <span>/ {String(available.length).padStart(2, "0")}</span>
+              </span>
+              <button
+                className="icon-button"
+                disabled={mission.status !== "IDLE"}
+                aria-label="Editar misión"
+                onClick={() => setEdit(mission)}
+              >
+                <Pencil size={16} />
+              </button>
+            </div>
+            <div className="mission-category">{mission.category}</div>
+            <h2>{mission.name}</h2>
+            <div className="mission-meta">
+              <span>
+                <Clock3 size={15} />
+                {Math.ceil(mission.durationSeconds / 60)} min
+              </span>
+              <span>
+                <MapPin size={15} />
+                {mission.location}
+              </span>
+            </div>
+            <div className="ticket-rule" />
+            <div className="ticket-rewards">
+              <span>
+                EL BOTÍN
+                <strong>
+                  +{mission.rewardCash.toLocaleString("es-ES")}{" "}
+                  <small>CR</small>
+                </strong>
+              </span>
+              <span>
+                EL RESPETO
+                <strong>
+                  +{mission.rewardRespect} <small>XP</small>
+                </strong>
+              </span>
+              <span className="difficulty-mark">
+                {difficultyNames[mission.difficulty]}
+                {mission.recurrence && mission.recurrence !== "none" && (
+                  <Repeat2 size={14} />
+                )}
+              </span>
+            </div>
+            <button
+              className="primary-button start-button"
+              onClick={() => begin(mission)}
+            >
+              {mission.status === "ACTIVE"
+                ? "Volver a la misión"
+                : mission.status === "VERIFY"
+                  ? "Verificar misión"
+                  : (mission.timeRemaining ?? mission.durationSeconds) <
+                      mission.durationSeconds
+                    ? "Continuar misión"
+                    : "Empezar misión"}
+              <Play size={19} fill="currentColor" />
+            </button>
+          </article>
+        ) : (
+          <article className="mission-ticket empty-state">
+            <span className="eyebrow">EL SIGUIENTE PASO ES TUYO</span>
+            <h2>Espacio para algo bueno.</h2>
+            <p>
+              {category === "Todas"
+                ? "Crea tu próxima misión. Las terminadas siguen en tu archivo."
+                : "No hay misiones pendientes en este territorio."}
+            </p>
+            <button className="primary-button" onClick={() => setSheet("new")}>
+              Crear misión <Plus size={19} />
+            </button>
+            {state.missions.length === 0 && (
+              <button
+                className="text-button"
+                onClick={() => starterMissions().forEach(addMission)}
+              >
+                Usar misiones de inicio
+              </button>
+            )}
+          </article>
+        )}
+      </section>
+      <div className="deck-controls">
+        <button
+          className="icon-button"
+          disabled={available.length < 2}
+          aria-label="Misión anterior"
+          onClick={() => choose(-1)}
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <span>
+          {available.length > 1 ? "DESLIZA Y ELIGE" : "A TU RITMO"}
+          <span className="deck-dots">
+            {available.slice(0, 12).map((m, i) => (
+              <i key={m.id} className={i === index ? "current" : ""} />
+            ))}
+          </span>
+        </span>
+        <button
+          className="icon-button"
+          disabled={available.length < 2}
+          aria-label="Misión siguiente"
+          onClick={() => choose(1)}
+        >
+          <ArrowRight size={20} />
+        </button>
+      </div>
+      <div className="below-deck">
+        <button onClick={() => setSheet("list")}>
+          Todas tus misiones{" "}
+          <span>
+            {state.missions.length}
+            <ArrowDown size={16} />
+          </span>
+        </button>
+        <button
+          className={pending ? "pending-link" : ""}
+          onClick={() => setSheet("consequences")}
+        >
+          {pending ? "Toca cumplir" : "Sin cuentas pendientes"}
+          <span>
+            {pending || <Check size={16} />}
+            <ChevronRight size={17} />
+          </span>
+        </button>
+      </div>
+      {message && !sheet && (
+        <p className="toast" role="status">
+          {message}
+        </p>
+      )}
+      {sheet === "new" && <MissionForm onClose={() => setSheet(null)} />}
+      {edit && (
+        <MissionForm mission={edit} onClose={() => setEdit(undefined)} />
+      )}
+      {sheet === "consequences" && (
+        <Consequences onClose={() => setSheet(null)} />
+      )}
+      {sheet === "filter" && (
+        <Sheet title="Elige tu territorio" onClose={() => setSheet(null)}>
+          <div className="choice-list">
+            {["Todas", ...new Set(state.missions.map((m) => m.category))].map(
+              (c) => (
+                <button
+                  key={c}
+                  onClick={() => {
+                    setCategory(c);
+                    setSelected(undefined);
+                    setSheet(null);
+                  }}
+                >
+                  {c}
+                  {category === c ? (
+                    <Check size={20} />
+                  ) : (
+                    <ArrowRight size={18} />
+                  )}
+                </button>
+              ),
+            )}
+          </div>
+        </Sheet>
+      )}
+      {sheet === "list" && (
+        <Sheet title="Tus misiones" onClose={() => setSheet(null)}>
+          <div className="search-field">
+            <Search size={18} />
+            <input
+              aria-label="Buscar misiones"
+              placeholder="Busca tu próximo paso"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="segmented">
+            {[
+              ["open", "Pendientes"],
+              ["passed", "Hechas"],
+              ["failed", "Fallidas"],
+            ].map(([id, title]) => (
+              <button
+                key={id}
+                className={listStatus === id ? "selected" : ""}
+                onClick={() => setListStatus(id)}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+          {category !== "Todas" && (
+            <p className="supporting">
+              Territorio: {category}{" "}
+              <button
+                className="text-button"
+                onClick={() => setCategory("Todas")}
+              >
+                Ver todos
+              </button>
+            </p>
+          )}
+          <div className="mission-list">
+            {list.map((m) => (
+              <div key={m.id} className="mission-row">
+                <button
+                  className="mission-row-main"
+                  onClick={() => {
+                    if (["ACTIVE", "VERIFY"].includes(m.status)) {
+                      setSheet(null);
+                      onFocus(m.id);
+                    } else if (m.status === "IDLE") {
+                      setSelected(m.id);
+                      setSheet(null);
+                    }
+                  }}
+                >
+                  <small>
+                    {m.category} · {Math.ceil(m.durationSeconds / 60)} MIN
+                  </small>
+                  <strong>{m.name}</strong>
+                  {m.nextAvailable && (
+                    <small>
+                      Vuelve el {m.nextAvailable.split("-").reverse().join("/")}
+                    </small>
+                  )}
+                </button>
+                <div className="row-actions">
+                  {m.status === "IDLE" && (
+                    <button
+                      className="icon-button"
+                      aria-label={`Editar ${m.name}`}
+                      onClick={() => setEdit(m)}
+                    >
+                      <Pencil size={17} />
+                    </button>
+                  )}
+                  <button
+                    className="icon-button"
+                    aria-label={`Eliminar ${m.name}`}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `¿Eliminar «${m.name}»?${state.settings.penalizeDelete ? " Se añadirá una estrella." : ""}`,
+                        )
+                      )
+                        removeMission(m.id);
+                    }}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!list.length && (
+              <p className="empty-note">No hay misiones en esta selección.</p>
+            )}
+          </div>
+          <div className="import-tools">
+            <button
+              className="text-button"
+              onClick={() => {
+                downloadFile(
+                  "misiones.csv",
+                  exportMissions(state.missions),
+                  "text/csv;charset=utf-8",
+                );
+              }}
+            >
+              <Download size={16} />
+              Exportar CSV
+            </button>
+            <button
+              className="text-button"
+              onClick={() => inputRef.current?.click()}
+            >
+              <Upload size={16} />
+              Importar CSV
+            </button>
+            <button
+              className="text-button"
+              onClick={() =>
+                downloadFile(
+                  "plantilla_misiones.csv",
+                  exportMissions(starterMissions()),
+                  "text/csv;charset=utf-8",
+                )
+              }
+            >
+              Plantilla
+            </button>
+          </div>
+          {message && (
+            <p className="inline-notice" role="alert">
+              {message}
+            </p>
+          )}
+          <input
+            type="file"
+            ref={inputRef}
+            hidden
+            accept=".csv"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const missions = importMissions(await file.text());
+                missions.forEach(addMission);
+                setMessage(`${missions.length} misiones importadas`);
+                setSheet(null);
+              } catch (error) {
+                setMessage((error as Error).message);
+              }
+              e.target.value = "";
+            }}
+          />
+        </Sheet>
+      )}
     </div>
   );
 }

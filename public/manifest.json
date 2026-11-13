@@ -1,24 +1,24 @@
 {
-  "name": "Los Santos Streets – Into The Mission",
-  "short_name": "IntoTheMission",
-  "description": "Missions • Rewards. Do the job. Get the gear.",
+  "name": "Into The Mission · Coastal Edition",
+  "short_name": "Into The Mission",
+  "description": "Tu tiempo. Tus reglas. Misiones, recompensas y pequeños grandes pasos.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0d12",
-  "theme_color": "#f5a623",
+  "background_color": "#24182b",
+  "theme_color": "#24182b",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "/icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/icons/icon-512x512.png",
+      "src": "/icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }
